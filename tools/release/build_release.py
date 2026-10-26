@@ -73,7 +73,7 @@ def main():
                 'upstream': 'https://github.com/NagyD/SDLPoP',
                 'graphics_reference': 'https://github.com/chanunnaki/SDLPoP-PSP',
                 'macintosh_graphics': 'not bundled; generate locally from your own Macintosh colour-game disk',
-                'live_full_game_and_steam_deck_tests': 'pending; see README.md#validation-limits'}
+                'live_full_game_and_steam_deck_tests': 'pending; build/startup checks are separate from native playthrough testing'}
     if args.platform == 'linux':
         if platform.system() != 'Linux' or platform.machine() != 'x86_64':
             raise SystemExit('Linux x64 packaging requires a Linux x64 build host.')

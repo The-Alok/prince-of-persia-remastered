@@ -69,13 +69,14 @@ the current source, not those historical archives.
 
 Each grid shows **DOS, SNES 1, SNES 2 and SNES 3**, in that order.
 
+**Dungeon — Level 1**
+
+![DOS and all three SNES packs in the same Level 1 dungeon scene](doc/images/graphics-packs-level1.png)
+
 **Palace — Level 5**
 
 ![DOS and all three SNES packs in the same palace scene](doc/images/graphics-packs.png)
 
-**Dungeon — Level 1**
-
-![DOS and all three SNES packs in the same Level 1 dungeon scene](doc/images/graphics-packs-level1.png)
 
 ## Download and play
 
@@ -84,7 +85,7 @@ Download the appropriate archive from [Releases](https://github.com/The-Alok/pri
 | Platform | Download | Start |
 | --- | --- | --- |
 | Windows x64 | `prince-of-persia-remastered-v1.0.0-windows-x86_64.zip` | Extract everything, then double-click `prince.exe` |
-| Linux x64 | `prince-of-persia-remastered-v1.0.0-linux-x86_64.tar.gz` | Extract, then run `./launch.sh` |
+| Linux x64 | `prince-of-persia-remastered-v1.0.0-linux-x86_64.tar.gz` | Extract, then run `./launch.sh` or `./prince` |
 
 Windows includes the required SDL runtime DLLs; keep them beside `prince.exe`.
 Linux uses the system SDL2 and SDL2_image libraries. On Debian/Ubuntu:
@@ -108,15 +109,12 @@ build from source. Steam Deck compatibility has not been certified.
 - Optional locally generated **Mac Native FULL v1.0.0**, first in the menu
   and preferred at startup when installed.
 
+Switch between installed packs on the fly in Settings → Visuals → Graphics
+pack; no restart is needed. Restart only after installing a newly generated
+pack so it can be discovered.
+
 SDLPoP gameplay, collision, animation timing and replay logic are preserved.
 
-## Validation limits
-
-Automated visual/reference and lifecycle checks pass. Windows startup and title
-rendering were checked under Wine; native Windows sound, input and a complete
-playthrough remain pending. Steam Deck testing and broader original-Mac motion
-comparisons also remain open. Build/startup checks are separate from live
-gameplay testing.
 
 ## Quick controls
 
