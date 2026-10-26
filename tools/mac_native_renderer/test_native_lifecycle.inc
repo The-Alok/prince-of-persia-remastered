@@ -40,7 +40,7 @@ static void check_native_lifecycle(void) {
 	/* Real menu pack switching replaces the PAK buffer and frees/reloads chtabs. */
 	byte original_pack = graphics_pack_index;
 	const char* packs[] = {"mac_native_full", "dos", "mac_prince", "snes_alt", "snes"};
-	const char* names[] = {"Mac Native FULL v1.0.0", "DOS", "SNES 1", "SNES 2", "SNES 3"};
+	const char* names[] = {"Mac Native FULL v" REMASTERED_VERSION, "DOS", "SNES 1", "SNES 2", "SNES 3"};
 	assert(num_available_paks == 5); ++checks;
 	for (unsigned i = 0; i < COUNT(packs); ++i) {
 		assert(strcmp(available_paks[i].id, packs[i]) == 0 &&

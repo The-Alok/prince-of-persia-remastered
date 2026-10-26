@@ -68,6 +68,18 @@ void pop_main() {
 #ifdef USE_MENU
 	load_ingame_settings();
 #endif
+	/* The launcher selects graphics before the first asset load, without
+	 * changing any gameplay/replay state. */
+	const char* requested_graphics = check_param("graphics=");
+	if (requested_graphics) {
+		for (byte i = 0; i < num_available_paks; ++i) {
+			if (strcasecmp(requested_graphics + 9, available_paks[i].id) == 0) {
+				graphics_pack_index = i;
+				snprintf_check(graphics_pack_name, sizeof(graphics_pack_name), "%s", available_paks[i].id);
+				break;
+			}
+		}
+	}
 	if (check_param("mute")) is_sound_on = 0;
 	turn_sound_on_off((is_sound_on != 0) * 15); // Turn off sound/music if those options were set.
 

@@ -1,4 +1,4 @@
-# Prince of Persia Remastered v1.0.0
+# Prince of Persia Remastered v1.0.1
 
 **A Macintosh HD graphics port for Windows and Linux, with a custom native
 640×400 renderer and 2× high-resolution sprite support.**
@@ -29,33 +29,34 @@ Disk Copy 4.2 and Apple Partition Map formats from their contents. HFS+,
 compressed images and flux captures are not supported. A renamed file alone
 does not convert its format. No game files are downloaded or executed.
 
-Install Python 3.9 or newer, then run from the game folder:
+### Start with the launcher
 
-```sh
-# Linux
-python3 tools/build_mac_graphics_pack.py "/path/to/PoP1.dsk"
-# A raw .hfs volume works the same way:
-python3 tools/build_mac_graphics_pack.py "/path/to/PoP1.hfs"
+1. Extract the complete game download into a folder you can write to.
+2. Copy your `PoP1.hfs` or `PoP1.dsk` image into the same folder as `prince.exe`
+   (Windows) or `prince` (Linux). Or use **Browse for image** in the launcher.
+3. Open `prince.exe` on Windows, or run `./prince` on Linux. The launcher finds
+   the image and prepares the graphics automatically. When **Graphics ready**
+   turns green, click **Play**.
 
-# Windows (with Python installed)
-py -3 tools/build_mac_graphics_pack.py "C:\Games\PoP1.hfs"
-```
+The two status lights show whether a disk image is selected and whether the
+Macintosh graphics are ready. The launcher remembers a browsed image and
+reuses the prepared graphics on later launches. No Python installation or
+extraction commands are needed. The disk image is read-only; nothing is
+mounted, downloaded or executed from it.
 
-Run **one** command for your image. The importer writes
-`data/res_mac_native_full.pak`; restart the game and select **Mac Native FULL**
-in Settings → Visuals. No Pillow or other Python package is needed for this
-normal import. Existing identical output is reused; replacing a different pack
-requires an explicit `--force`. The input disk is opened read-only.
+The game executable lives in `runtime/`; open the launcher in the main folder.
+**Other graphics** starts the game with the installed alternatives. You can
+switch packs in the game's Visual settings.
 
 Without an imported Mac pack, the game builds and runs with the bundled DOS
-and SNES packs. The INI prefers Macintosh when its generated pack is installed,
-and otherwise the selector starts with DOS. The screenshots below illustrate
+and SNES packs. The launcher selects Macintosh when you press Play after preparing it. The screenshots below illustrate
 the optional Macintosh pack alongside the other graphics options.
 
 **Historical release notice:** the previously published v1.0.0 downloads and
 older Git history still contain Macintosh assets until their separate cleanup
-is reviewed and completed. The import-only layout described here applies to
-the current source, not those historical archives.
+is reviewed and completed. The new launcher is available from the current source and local v1.0.1 builds;
+the historical v1.0.0 downloads do not yet include it. Their cleanup and a new
+public release remain separate steps.
 
 ## Gameplay screenshots
 
@@ -110,7 +111,7 @@ build from source. Steam Deck compatibility has not been certified.
 - Original-data sword attachment placement for the Prince and guard families.
 - Native cutscene composition, story-card colours, health flasks and RGB fades.
 - Four bundled packs: **DOS**, **SNES 1**, **SNES 2**, **SNES 3**.
-- Optional locally generated **Mac Native FULL v1.0.0**, first in the menu
+- Optional locally generated **Mac Native FULL v1.0.1**, first in the menu
   and preferred at startup when installed.
 
 Switch between installed packs on the fly in Settings → Visuals → Graphics
@@ -161,10 +162,13 @@ v1.0.0 is the [v1.0.0 tag](https://github.com/The-Alok/prince-of-persia-remaster
 <details>
 <summary>Optional Macintosh renderer tests</summary>
 
-The format/safety tests do not require game assets:
+Developers can still use `tools/build_mac_graphics_pack.py` for a manual import.
+The normal player launcher needs no Python. The format/safety tests do not
+require game assets:
 
 ```sh
 python3 tools/test_mac_disk_import.py
+python3 tools/test_launcher.py
 ```
 
 For image/renderer regression, install Pillow and generate private fixtures

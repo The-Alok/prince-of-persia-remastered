@@ -54,11 +54,8 @@ def main():
     for name in ('gameplay-level1-mac.png', 'gameplay-mac.png',
                  'graphics-packs.png', 'graphics-packs-level1.png', 'welcome.png'):
         add(ROOT/'doc/images'/name)
-    # Ship the importer, never the player's generated Macintosh pack or dumps.
-    for name in ('tools/build_mac_graphics_pack.py',
-                 'tools/mac_native_renderer/extract_mac_reference.py',
-                 'tools/mac_color_port/decode_mac_pop_reference.py'):
-        add(ROOT/name)
+    # The launcher contains the importer. Python tools stay in the source tree;
+    # neither an interpreter nor the player's generated Mac pack is bundled.
     # A checked inventory prevents local Mac imports/dumps (or user mods) from
     # leaking into an archive, even if they sit beside the bundled resources.
     for line in (ROOT/'tools/release/bundled_data.sha256').read_text().splitlines():
@@ -79,7 +76,7 @@ def main():
                 'source': f'https://github.com/The-Alok/prince-of-persia-remastered/tree/{source_ref}',
                 'upstream': 'https://github.com/NagyD/SDLPoP',
                 'graphics_reference': 'https://github.com/chanunnaki/SDLPoP-PSP',
-                'macintosh_graphics': 'not bundled; generate locally from your own Macintosh colour-game disk',
+                'macintosh_graphics': 'not bundled; launcher imports your own Macintosh colour-game disk',
                 'live_full_game_and_steam_deck_tests': 'pending; build/startup checks are separate from native playthrough testing'}
     if args.platform == 'linux':
         if platform.system() != 'Linux' or platform.machine() != 'x86_64':
@@ -87,12 +84,15 @@ def main():
         if f'v{VERSION}' not in command(str(ROOT/'prince'), '--version'):
             raise SystemExit('Rebuild prince with the current version before packaging.')
         add(ROOT/'prince')
+        if not (ROOT/'runtime/prince-engine').is_file():
+            raise SystemExit('Build both the launcher and runtime/prince-engine with make -C src.')
+        add(ROOT/'runtime/prince-engine')
         add(ROOT/'tools/release/launch.sh', 'launch.sh')
-        executable_names.update(('prince', 'launch.sh'))
-        dependencies = command('ldd', 'prince')
+        executable_names.update(('prince', 'runtime/prince-engine', 'launch.sh'))
+        dependencies = command('ldd', 'prince') + command('ldd', 'runtime/prince-engine')
         if 'not found' in dependencies:
             raise SystemExit('A runtime library is missing.')
-        versions = sorted(set(re.findall(r'GLIBC_([0-9.]+)', command('readelf', '--version-info', 'prince'))),
+        versions = sorted(set(re.findall(r'GLIBC_([0-9.]+)', command('readelf', '--version-info', 'prince') + command('readelf', '--version-info', 'runtime/prince-engine'))),
                           key=lambda value: tuple(map(int, value.split('.'))))
         metadata.update(build_os=platform.freedesktop_os_release().get('PRETTY_NAME'),
                         required_glibc_symbol_versions=versions,
@@ -102,10 +102,13 @@ def main():
         binary = runtime/'prince.exe'
         if not binary.exists() or binary.read_bytes()[:2] != b'MZ':
             raise SystemExit('Build the Windows runtime first with build_windows.py.')
+        report = runtime/'BUILD_INFO_WINDOWS.json'
+        if not (runtime/'runtime/prince-engine.exe').is_file() or not report.is_file() or json.loads(report.read_text()).get('version') != VERSION:
+            raise SystemExit('Rebuild the Windows launcher and engine for this version with build_windows.py.')
         for path in runtime.rglob('*'):
             if path.is_file():
                 relative = path.relative_to(runtime)
-                if path.name in ('prince.exe', 'BUILD_INFO_WINDOWS.json') or path.suffix.lower() == '.dll' or relative.parts[0] == 'licenses':
+                if path.name in ('prince.exe', 'BUILD_INFO_WINDOWS.json') or relative.as_posix() == 'runtime/prince-engine.exe' or path.suffix.lower() == '.dll' or relative.parts[0] == 'licenses':
                     add(path, relative.as_posix())
         contents['launch.bat'] = b'@echo off\r\ncd /d "%~dp0"\r\nstart "" "%~dp0prince.exe" %*\r\n'
         metadata.update(bundled_runtime='See BUILD_INFO_WINDOWS.json and licenses/', native_windows_playtest='pending')

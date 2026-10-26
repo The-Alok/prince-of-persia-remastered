@@ -14,13 +14,17 @@ cflags = $(cflags) /MD /O2
 
 cflags = $(cflags) /nologo /fp:fast /GR- /wd4048
 
-all: prince.exe
+all: prince.exe prince-engine.exe
 
 .c.obj:
 	$(cc) $(cdebug) $(cflags) $(cvars) /I. /I"$(sdl)\include" $<
 
-prince.exe: $(OBJ)
-	$(link) $(ldebug) $(conflags) -out:..\prince.exe $(conlibs) $(OBJ) $(LIBS)
+prince-engine.exe: $(OBJ)
+	@if not exist ..\runtime mkdir ..\runtime
+	$(link) $(ldebug) $(conflags) -out:..\runtime\prince-engine.exe $(conlibs) $(OBJ) $(LIBS)
+
+prince.exe: launcher.obj mac_asset_import.obj
+	$(link) $(ldebug) $(conflags) -out:..\prince.exe $(conlibs) launcher.obj mac_asset_import.obj $(LIBS) comdlg32.lib
 
 clean:
 	del *.obj prince.exe

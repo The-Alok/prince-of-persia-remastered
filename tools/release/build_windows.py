@@ -62,10 +62,17 @@ def main():
         list(pool.map(compile_one, names))
     subprocess.run([windres, '-I', str(ROOT / 'src'), str(ROOT / 'src/icon.rc'), str(objects / 'icon.o')], check=True, cwd=ROOT / 'src')
     binary = runtime / 'prince.exe'
+    engine = runtime / 'runtime/prince-engine.exe'
+    engine.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run([compiler, '-mwindows', '-static-libgcc', *[str(objects / name) for name in names],
-                    str(objects / 'icon.o'), '-o', str(binary), *libraries], check=True)
+                    str(objects / 'icon.o'), '-o', str(engine), *libraries], check=True)
+    for name in ('launcher.o', 'mac_asset_import.o'):
+        compile_one(name)
+    subprocess.run([compiler, '-mwindows', '-static-libgcc', str(objects/'launcher.o'),
+                    str(objects/'mac_asset_import.o'), str(objects/'icon.o'),
+                    '-o', str(binary), *libraries, '-lcomdlg32'], check=True)
     available = {path.name.lower(): path for folder in dll_dirs for path in folder.glob('*.dll')}
-    pending, copied, system = [binary], set(), set()
+    pending, copied, system = [binary, engine], set(), set()
     # These libraries can be loaded by name rather than through PE imports.
     # SDL_image's PNG codec is needed by fallback/font assets. Fedora's SDL2
     # compatibility implementation loads SDL3 dynamically.
@@ -108,7 +115,9 @@ def main():
     report = {'platform': 'windows-x86_64', 'compiler': subprocess.check_output([compiler, '--version'], text=True).splitlines()[0],
               'bundled_dlls': sorted(copied), 'system_dlls': sorted(system),
               'sdl2_runtime': sdl2.parent.name if args.sdl2 else 'system MinGW SDL2 distribution',
-              'native_windows_playtest': 'pending', 'executable': 'prince.exe'}
+              'native_windows_playtest': 'pending', 'executable': 'prince.exe',
+              'engine': 'runtime/prince-engine.exe', 'asset_importer': 'built into launcher; no Python required',
+              'version': re.search(r'^#define REMASTERED_VERSION "([^"]+)"', (ROOT/'src/config.h').read_text(), re.M)[1]}
     (runtime / 'BUILD_INFO_WINDOWS.json').write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps(report, indent=2))
 
