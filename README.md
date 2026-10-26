@@ -14,6 +14,10 @@ Macintosh sprites use their original native pixels and SHPD origins.
 The project focuses on this Macintosh presentation, its asset handling and
 platform builds while retaining SDLPoP's gameplay foundation.
 
+## Gameplay screenshots
+
+### Palace — Level 5
+
 **Mac Native FULL — Macintosh gameplay**
 
 ![Mac Native FULL gameplay in the palace](doc/images/gameplay-mac.png)
@@ -21,6 +25,16 @@ platform builds while retaining SDLPoP's gameplay foundation.
 **Other included graphics packs — DOS, SNES 1, SNES 2 and SNES 3**
 
 ![DOS and all three SNES packs in the same palace scene](doc/images/graphics-packs.png)
+
+### Dungeon — Level 1
+
+**Mac Native FULL — Macintosh gameplay**
+
+![Mac Native FULL gameplay in the Level 1 dungeon](doc/images/gameplay-level1-mac.png)
+
+**Other included graphics packs — DOS, SNES 1, SNES 2 and SNES 3**
+
+![DOS and all three SNES packs in the same Level 1 dungeon scene](doc/images/graphics-packs-level1.png)
 
 ## Download and play
 
