@@ -70,13 +70,6 @@ build from source. Steam Deck compatibility has not been certified.
 
 SDLPoP gameplay, collision, animation timing and replay logic are preserved.
 
-## Validation limits
-
-Automated visual/reference and lifecycle checks pass. Windows startup and title
-rendering were checked under Wine; native Windows sound, input and a complete
-playthrough remain pending. Steam Deck testing and broader original-Mac motion
-comparisons also remain open. Build/startup checks are separate from live
-gameplay testing.
 
 ## Quick controls
 
