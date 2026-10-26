@@ -10,6 +10,8 @@
 #include <sys/stat.h>
 #ifdef _WIN32
 #include <windows.h>
+#include <fcntl.h>
+#include <io.h>
 #include <commdlg.h>
 #include <SDL_syswm.h>
 #else
@@ -147,7 +149,7 @@ static void select_disk(Launcher *a,const char *path) {
 #ifndef _WIN32
 static void clear_browser(Launcher *a){for(int i=0;i<a->count;i++)free(a->files[i].name);a->count=0;}
 static int browser_order(const void *l,const void *r){const BrowserEntry*x=l,*y=r;if(x->directory!=y->directory)return y->directory-x->directory;return SDL_strcasecmp(x->name,y->name);}
-static int image_extension(const char *name){const char*e=strrchr(name,'.');return e&&(!SDL_strcasecmp(e,".hfs")||!SDL_strcasecmp(e,".dsk")||!SDL_strcasecmp(e,".dc42"));}
+static int image_extension(const char *name){const char*e=strrchr(name,'.');return e&&(!SDL_strcasecmp(e,".hfs")||!SDL_strcasecmp(e,".dsk")||!SDL_strcasecmp(e,".dc42")||!SDL_strcasecmp(e,".iso")||!SDL_strcasecmp(e,".hqx")||!SDL_strcasecmp(e,".sit"));}
 static void open_directory(Launcher *a,const char *directory) {
     char next[PATH_CAP];SDL_strlcpy(next,directory,sizeof(next));
     DIR *d=opendir(next);if(!d){SDL_strlcpy(a->browser_message,"Cannot open that folder. Choose another location.",sizeof(a->browser_message));return;}
@@ -180,7 +182,7 @@ static void browse(Launcher *a) {
     wchar_t file[32768]={0};OPENFILENAMEW dialog;SDL_zero(dialog);dialog.lStructSize=sizeof(dialog);
     SDL_SysWMinfo info;SDL_VERSION(&info.version);if(SDL_GetWindowWMInfo(a->window,&info))dialog.hwndOwner=info.info.win.window;
     dialog.lpstrFile=file;dialog.nMaxFile=32768;dialog.lpstrTitle=L"Choose your Macintosh Prince of Persia disk image";
-    dialog.lpstrFilter=L"Macintosh disk images (*.hfs;*.dsk;*.dc42)\0*.hfs;*.dsk;*.dc42\0All files\0*.*\0\0";
+    dialog.lpstrFilter=L"Macintosh game images and archives\0*.hfs;*.dsk;*.dc42;*.iso;*.hqx;*.sit\0All files\0*.*\0\0";
     dialog.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR|OFN_EXPLORER;
     if(GetOpenFileNameW(&dialog)) {
         int n=WideCharToMultiByte(CP_UTF8,0,file,-1,NULL,0,NULL,NULL);char*p=n?malloc(n):NULL;
@@ -220,9 +222,9 @@ static void draw(Launcher *a) {
         button(a,(SDL_Rect){36,311,224,42},"BROWSE FOR IMAGE",0,!a->worker);
         if(a->worker){int x=36+(SDL_GetTicks()/8)%660;fill(r,(SDL_Rect){36,373,728,4},(SDL_Color){38,50,72,255});fill(r,(SDL_Rect){x,373,68,4},gold);}
         wrapped(r,38,392,720,a->message,a->ready?green:muted);
-        button(a,(SDL_Rect){36,481,224,44},"OTHER GRAPHICS",0,!a->worker);
+        button(a,(SDL_Rect){36,481,224,44},"PLAY DOS MODE",0,!a->worker);
         button(a,(SDL_Rect){540,476,224,54},"PLAY",1,a->ready&&!a->worker);
-        text(r,38,544,1,"YOUR DISK IS READ ONLY. GRAPHICS ARE PREPARED ONCE. NO PYTHON NEEDED.",muted);
+        text(r,38,544,1,"YOUR DISK IS READ ONLY. GRAPHICS ARE PREPARED ONCE.",muted);
     }
     SDL_RenderPresent(r);
 }
@@ -270,10 +272,27 @@ static int launch_engine(Launcher *a,int argc,char **argv,const char *graphics) 
 int main(int argc,char **argv) {
     Launcher a;SDL_zero(a);a.running=1;a.base=SDL_GetBasePath();
     if(!a.base)return 1;
+    /* Developer bridge used by Python fixture tools for archive inputs. */
+    if(argc==3&&!strcmp(argv[1],"--mac-source")){
+        unsigned char *bundle=NULL;size_t size=0;char error[512];
+        int ok=mac_import_source_bundle(argv[2],&bundle,&size,error,sizeof(error));
+#ifdef _WIN32
+        _setmode(_fileno(stdout),_O_BINARY);
+#endif
+        if(ok)ok=fwrite(bundle,1,size,stdout)==size;
+        else fprintf(stderr,"%s\n",error);
+        free(bundle);SDL_free(a.base);return ok?0:1;
+    }
+    /* Developer/native importer entry; normal players use the setup window. */
+    if(argc==4&&!strcmp(argv[1],"--import-mac")){char error[512];int ok=mac_import_disk(argv[2],argv[3],error,sizeof(error));if(!ok)fprintf(stderr,"%s\n",error);SDL_free(a.base);return ok?0:1;}
     /* Preserve --version, replay, screenshot and other command-line workflows. */
     if(argc>1){int result=launch_engine(&a,argc,argv,NULL);SDL_free(a.base);return result?result-1:1;}
     a.pack=join(a.base,"data/res_mac_native_full.pak");a.config=join(a.base,"data/mac-launcher.cfg");
-    if(!a.pack||!a.config||SDL_Init(SDL_INIT_VIDEO|SDL_INIT_TIMER)){free(a.pack);free(a.config);SDL_free(a.base);return 1;}
+    if(!a.pack||!a.config){free(a.pack);free(a.config);SDL_free(a.base);return 1;}
+    /* A prepared installation goes directly to the game, without creating a
+     * launcher window or reading the original disk image again. */
+    if(mac_import_pack_status(a.pack)==1){int result=launch_engine(&a,1,argv,NULL);free(a.pack);free(a.config);SDL_free(a.base);return result?0:1;}
+    if(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_TIMER)){free(a.pack);free(a.config);SDL_free(a.base);return 1;}
     a.window=SDL_CreateWindow(REMASTERED_NAME " - Launcher",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,W,H,SDL_WINDOW_ALLOW_HIGHDPI|SDL_WINDOW_RESIZABLE);
     a.renderer=a.window?SDL_CreateRenderer(a.window,-1,SDL_RENDERER_SOFTWARE):NULL;
     if(!a.renderer){SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,REMASTERED_NAME,"Could not open the launcher window.",a.window);if(a.window)SDL_DestroyWindow(a.window);SDL_Quit();free(a.pack);free(a.config);SDL_free(a.base);return 1;}
@@ -293,10 +312,11 @@ int main(int argc,char **argv) {
     while(a.running) {
         if(a.worker&&SDL_AtomicGet(&a.job.done)) {
             SDL_WaitThread(a.worker,NULL);a.worker=NULL;a.ready=a.job.success||mac_import_pack_status(a.pack)==1;a.disk_found=readable(a.disk);
-            SDL_strlcpy(a.message,a.ready?"Macintosh graphics prepared successfully. Press Play to start.":a.job.error,sizeof(a.message));
+            SDL_strlcpy(a.message,a.ready?"Macintosh graphics ready. Starting the game...":a.job.error,sizeof(a.message));
+            if(a.ready){play=1;a.running=0;}
         }
         SDL_Event event;
-        while(SDL_PollEvent(&event)) {
+        while(a.running&&SDL_PollEvent(&event)) {
             if(event.type==SDL_QUIT)a.running=0;
             if(event.type==SDL_KEYDOWN&&event.key.keysym.sym==SDLK_ESCAPE){if(a.browse){a.browse=0;SDL_StopTextInput();}else a.running=0;}
             if(event.type==SDL_MOUSEBUTTONUP&&event.button.button==SDL_BUTTON_LEFT) {

@@ -20,6 +20,7 @@ The authors of this program may be contacted at https://forum.princed.org
 
 #include "common.h"
 #include "pak.h"
+#include "video_filters.h"
 #include <time.h>
 #include <errno.h>
 
@@ -135,7 +136,17 @@ static void blit_image_scaled_for_renderer(SDL_Surface* image, const SDL_Rect* s
 		dest_rect.w = (src_rect ? src_rect->w : image->w) * SDLP_RENDER_SCALE;
 		dest_rect.h = (src_rect ? src_rect->h : image->h) * SDLP_RENDER_SCALE;
 		if (SDL_BlitScaled(image, src_rect, target, &dest_rect) != 0) {
-			sdlperror("blit_image_scaled_for_renderer: SDL_BlitScaled");
+			/* SDL2's Windows blitter cannot scale some indexed-to-RGB
+			 * combinations. Convert this blit only, preserving its palette,
+			 * colour key and alpha; the source pack remains untouched. */
+			SDL_Surface* converted = SDL_ConvertSurfaceFormat(image, SDL_PIXELFORMAT_ARGB8888, 0);
+			dest_rect.x = logical_x * SDLP_RENDER_SCALE;
+			dest_rect.y = logical_y * SDLP_RENDER_SCALE;
+			dest_rect.w = (src_rect ? src_rect->w : image->w) * SDLP_RENDER_SCALE;
+			dest_rect.h = (src_rect ? src_rect->h : image->h) * SDLP_RENDER_SCALE;
+			if (!converted || SDL_BlitScaled(converted, src_rect, target, &dest_rect) != 0)
+				sdlperror("blit_image_scaled_for_renderer: SDL_BlitScaled");
+			SDL_FreeSurface(converted);
 		}
 	}
 }
@@ -603,6 +614,7 @@ void quit(int exit_code) {
 
 // seg009:0C90
 void restore_stuff() {
+	free_video_filter_buffers();
 	SDL_Quit();
 }
 
@@ -2859,43 +2871,72 @@ void init_overlay(void) {
 }
 
 SDL_Surface* onscreen_surface_2x;
+static SDL_Surface* smooth_hq_surface;
+static SDL_Texture* texture_smooth_hq;
+static int fuzzy_width, fuzzy_height, fuzzy_target;
+
+static SDL_Texture* make_filter_texture(int access, int width, int height, int linear) {
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, linear ? "1" : "0");
+    SDL_Texture* texture = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGB24, access, width, height);
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+    return texture;
+}
+
+void free_video_filter_buffers(void) {
+    SDL_FreeSurface(smooth_hq_surface); smooth_hq_surface = NULL;
+    SDL_FreeSurface(onscreen_surface_2x); onscreen_surface_2x = NULL;
+    SDL_DestroyTexture(texture_smooth_hq); texture_smooth_hq = NULL;
+    SDL_DestroyTexture(texture_fuzzy); texture_fuzzy = NULL;
+    SDL_DestroyTexture(texture_blurry); texture_blurry = NULL;
+    SDL_DestroyTexture(texture_sharp); texture_sharp = NULL;
+    target_texture = NULL;
+}
 
 void init_scaling(void) {
-	// Don't crash in validate mode.
-	if (renderer_ == NULL) return;
-
-	if (texture_sharp == NULL) {
-		texture_sharp = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, SDLP_RENDER_WIDTH, SDLP_RENDER_HEIGHT);
-	}
-	if (scaling_type == 1) {
-		if (!is_renderer_targettexture_supported && onscreen_surface_2x == NULL) {
-#ifdef __amigaos4__
-			overlay_surface = SDL_CreateRGBSurface(0, SDLP_RENDER_WIDTH*2, SDLP_RENDER_HEIGHT*2, 24, Rmsk, Gmsk, Bmsk, 0);
-#else
-			onscreen_surface_2x = SDL_CreateRGBSurface(0, SDLP_RENDER_WIDTH*2, SDLP_RENDER_HEIGHT*2, 24, Rmsk, Gmsk, Bmsk, 0);
+    if (renderer_ == NULL) return;
+    if (scaling_type >= VIDEO_FILTER_COUNT) scaling_type = 0;
+    if (texture_sharp == NULL) texture_sharp = make_filter_texture(SDL_TEXTUREACCESS_STREAMING, SDLP_RENDER_WIDTH, SDLP_RENDER_HEIGHT, 0);
+    if (scaling_type == 1) {
+        /* Sharp matches the reference's integer-prescale/linear presentation,
+         * rather than forcing a 2x intermediate even at a native-size window. */
+        int output_w, output_h, logical_w, logical_h;
+        SDL_GetRendererOutputSize(renderer_, &output_w, &output_h);
+        SDL_RenderGetLogicalSize(renderer_, &logical_w, &logical_h);
+        if (!logical_w || !logical_h) { logical_w = SDLP_RENDER_WIDTH; logical_h = SDLP_RENDER_HEIGHT; }
+        double fit = MIN((double)output_w / logical_w, (double)output_h / logical_h);
+#if SDL_VERSION_ATLEAST(2,0,5)
+        if (SDL_RenderGetIntegerScale(renderer_) && fit >= 1.0) fit = (int)fit;
 #endif
-		}
-		if (texture_fuzzy == NULL) {
-			SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
-			int access = is_renderer_targettexture_supported ? SDL_TEXTUREACCESS_TARGET : SDL_TEXTUREACCESS_STREAMING;
-			texture_fuzzy = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGB24, access, SDLP_RENDER_WIDTH*2, SDLP_RENDER_HEIGHT*2);
-			SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
-		}
-		target_texture = texture_fuzzy;
-	} else if (scaling_type == 2) {
-		if (texture_blurry == NULL) {
-			SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
-			texture_blurry = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, SDLP_RENDER_WIDTH, SDLP_RENDER_HEIGHT);
-			SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
-		}
-		target_texture = texture_blurry;
-	} else {
-		target_texture = texture_sharp;
-	}
-	if (target_texture == NULL) {
-		sdlperror("init_scaling: SDL_CreateTexture");
-		quit(1);
-	}
+        int sx = MAX(1, MIN(8, (int)(logical_w * fit + 0.5) / SDLP_RENDER_WIDTH));
+        int sy = MAX(1, MIN(8, (int)(logical_h * fit + 0.5) / SDLP_RENDER_HEIGHT));
+        SDL_RendererInfo info;
+        if (!SDL_GetRendererInfo(renderer_, &info)) {
+            if (info.max_texture_width) sx = MAX(1, MIN(sx, info.max_texture_width / SDLP_RENDER_WIDTH));
+            if (info.max_texture_height) sy = MAX(1, MIN(sy, info.max_texture_height / SDLP_RENDER_HEIGHT));
+        }
+        int width = SDLP_RENDER_WIDTH * sx, height = SDLP_RENDER_HEIGHT * sy;
+        if (texture_fuzzy && (width != fuzzy_width || height != fuzzy_height || fuzzy_target != is_renderer_targettexture_supported)) {
+            SDL_DestroyTexture(texture_fuzzy); texture_fuzzy = NULL;
+            SDL_FreeSurface(onscreen_surface_2x); onscreen_surface_2x = NULL;
+        }
+        if (!texture_fuzzy) {
+            fuzzy_width = width; fuzzy_height = height; fuzzy_target = is_renderer_targettexture_supported;
+            texture_fuzzy = make_filter_texture(fuzzy_target ? SDL_TEXTUREACCESS_TARGET : SDL_TEXTUREACCESS_STREAMING, width, height, 1);
+        }
+        if (!fuzzy_target && !onscreen_surface_2x) onscreen_surface_2x = SDL_CreateRGBSurface(0, width, height, 24, Rmsk, Gmsk, Bmsk, 0);
+        target_texture = texture_fuzzy;
+    } else if (scaling_type == 2) {
+        if (!texture_blurry) texture_blurry = make_filter_texture(SDL_TEXTUREACCESS_STREAMING, SDLP_RENDER_WIDTH, SDLP_RENDER_HEIGHT, 1);
+        target_texture = texture_blurry;
+    } else if (scaling_type == 3) {
+        if (!smooth_hq_surface) smooth_hq_surface = SDL_CreateRGBSurface(0, SDLP_RENDER_WIDTH * 3, SDLP_RENDER_HEIGHT * 3, 24, Rmsk, Gmsk, Bmsk, 0);
+        if (!texture_smooth_hq) texture_smooth_hq = make_filter_texture(SDL_TEXTUREACCESS_STREAMING, SDLP_RENDER_WIDTH * 3, SDLP_RENDER_HEIGHT * 3, 1);
+        target_texture = texture_smooth_hq;
+    } else target_texture = texture_sharp;
+    if (!target_texture || !texture_sharp || (scaling_type == 3 && !smooth_hq_surface) ||
+        (scaling_type == 1 && !fuzzy_target && !onscreen_surface_2x)) {
+        sdlperror("init_scaling: could not create display filter buffers"); quit(1);
+    }
 }
 
 // seg009:38ED
@@ -3110,9 +3151,7 @@ void update_screen() {
 	SDL_Surface* surface = get_final_surface();
 	init_scaling();
 	if (scaling_type == 1) {
-		// Make "fuzzy pixels" like DOSBox does:
-		// First scale to double size with nearest-neighbor scaling, then scale to full screen with smooth scaling.
-		// The result is not as blurry as if we did only a smooth scaling, but not as sharp as if we did only nearest-neighbor scaling.
+		// Sharp: nearest-neighbour integer prescale, then linear window scaling.
 		if (is_renderer_targettexture_supported) {
 			SDL_UpdateTexture(texture_sharp, NULL, surface->pixels, surface->pitch);
 			SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
@@ -3126,7 +3165,10 @@ void update_screen() {
 			surface = onscreen_surface_2x;
 			SDL_UpdateTexture(target_texture, NULL, surface->pixels, surface->pitch);
 		}
-	} else {
+	} else if (scaling_type == 3) {
+        if (!scale3x_rgb_surface(surface, smooth_hq_surface)) { sdlperror("Scale3x: incompatible presentation surface"); quit(1); }
+        SDL_UpdateTexture(target_texture, NULL, smooth_hq_surface->pixels, smooth_hq_surface->pitch);
+    } else {
 		SDL_UpdateTexture(target_texture, NULL, surface->pixels, surface->pitch);
 	}
 	SDL_RenderClear(renderer_);
@@ -3823,6 +3865,16 @@ void process_events() {
 			{
 				int modifier = event.key.keysym.mod;
 				int scancode = event.key.keysym.scancode;
+
+                if ((scancode == SDL_SCANCODE_F7 || scancode == SDL_SCANCODE_F8) &&
+                    !(modifier & (KMOD_CTRL | KMOD_ALT | KMOD_GUI))) {
+                    if (!event.key.repeat && !(key_states[scancode] & KEYSTATE_HELD)) {
+                        key_states[scancode] |= KEYSTATE_HELD;
+                        if (scancode == SDL_SCANCODE_F7) cycle_video_filter();
+                        else queue_graphics_pack_cycle();
+                    }
+                    break;
+                }
 
 				// Handle these separately, so they won't interrupt things that are usually interrupted by a keypress. (pause, cutscene)
 #ifdef USE_FAST_FORWARD

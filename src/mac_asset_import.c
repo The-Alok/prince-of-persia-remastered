@@ -11,6 +11,7 @@ positions, gameplay and rendering logic are not involved in this startup step.
 #define _GNU_SOURCE 1
 #endif
 #include "mac_asset_import.h"
+#include "mac_archive.h"
 #include <SDL.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -429,52 +430,103 @@ static int install_entries(Entry *entries, const char *pack, Error *e) {
     return ok ? 1 : fail(e, "Could not finish saving the graphics. Check free space and permissions; existing files were preserved.");
 }
 
-int mac_import_disk(const char *disk, const char *pack, char *error, size_t error_size) {
-    Error e = {error, error_size}; size_t size = 0; int ok = 0;
-    if (error_size) error[0] = 0;
-    Byte *image = read_file(disk, (size_t)2147483648ULL, &size, &e), *catalog = NULL, *ext = NULL;
-    Byte *color_data = NULL, *color_fork = NULL, *application = NULL;
-    Hfs *h = calloc(1, sizeof(*h)); Entry *entries = calloc(1640, sizeof(*entries));
-    if (!image) goto done;
-    if (!h || !entries) { fail(&e, "Not enough memory to import graphics."); goto done; }
-    h->error = &e; Span original = {image, size};
-    if (!volume_of(original, &h->volume, &e) || !has(h->volume, 1024, 162)) goto done;
-    const Byte *mdb = h->volume.p + 1024;
-    h->block_size = be32(mdb + 20); h->allocation_start = be16(mdb + 28) * 512;
-    if (h->block_size < 512 || h->block_size % 512) { fail(&e, "Invalid HFS allocation block size."); goto done; }
-    unsigned ext_size = be32(mdb + 130), cat_size = be32(mdb + 146);
-    if (ext_size) {
-        ext = fork_of(h, ext_size, mdb + 134, 3, 0);
-        Span tree = {ext, ext_size}; if (!ext || !leaves(tree, overflow_record, h, &e)) goto done;
+typedef struct {
+    Byte *color, *color_fork, *application;
+    size_t color_size, color_fork_size, application_size;
+    unsigned depth; Error *error;
+} Sources;
+static int collect_container(Sources *sources, Span data, const char *name);
+static int collect_file(const char *name, const char type[4], const Byte *data, size_t data_size,
+                        const Byte *fork, size_t fork_size, void *context) {
+    Sources *s=context;Span r={fork,fork_size},palette;
+    const char *base=strrchr(name,'/');base=base?base+1:name;
+    Byte **destination=NULL;size_t *length=NULL;
+    if(!SDL_strcasecmp(base,"Persia(COLOR)")) {
+        if(s->color)return fail(s->error,"Multiple Persia(COLOR) graphics files found. Select one game copy.");
+        if(data_size>64u*1024*1024||fork_size>64u*1024*1024)return fail(s->error,"Game resource file is too large.");
+        s->color=malloc(data_size?data_size:1);s->color_fork=malloc(fork_size?fork_size:1);
+        if(!s->color||!s->color_fork)return fail(s->error,"Not enough memory for game resources.");
+        memcpy(s->color,data,data_size);memcpy(s->color_fork,fork,fork_size);
+        s->color_size=data_size;s->color_fork_size=fork_size;return 1;
     }
-    catalog = fork_of(h, cat_size, mdb + 150, 4, 0);
-    Span tree = {catalog, cat_size}; if (!catalog || !leaves(tree, catalog_record, h, &e)) goto done;
-    Span color = {0}, cf = {0}, clut = {0}; int color_count = 0, app_count = 0;
-    for (size_t i = 0; i < h->file_count; i++) {
-        GameFile *f = &h->files[i];
-        Byte *fork = fork_of(h, f->rsrc_size, f->rsrc_ext, f->id, 255);
-        if (!fork) goto done;
-        Span r = {fork, f->rsrc_size}, palette;
-        if (f->color) {
-            color_count++;
-            if (color_count > 1) { free(fork); fail(&e, "Multiple Persia(COLOR) files found on this image."); goto done; }
-            color_fork = fork; cf = r;
-            color_data = fork_of(h, f->data_size, f->data_ext, f->id, 0);
-            if (!color_data) goto done;
-            color.p = color_data; color.n = f->data_size;
-        } else if (resource(r, "clut", 2000, &palette)) {
-            app_count++;
-            if (app_count > 1) { free(fork); fail(&e, "Multiple game applications found on this image."); goto done; }
-            application = fork; clut = palette;
-        } else free(fork);
+    if(fork&&resource(r,"clut",2000,&palette)) {
+        if(s->application)return fail(s->error,"Multiple colour game applications found. Select one game copy.");
+        destination=&s->application;length=&s->application_size;
     }
-    if (color_count != 1 || app_count != 1) { fail(&e, "This image needs the Macintosh colour Prince of Persia application and Persia(COLOR) graphics file."); goto done; }
-    if (!build_entries(color, cf, clut, entries, &e)) goto done;
-    ok = install_entries(entries, pack, &e);
-done:
-    if (entries) for (unsigned i = 0; i < 1640; i++) free(entries[i].payload);
-    free(entries); free(h); free(application); free(color_fork); free(color_data); free(catalog); free(ext); free(image);
+    if(destination){*destination=malloc(fork_size?fork_size:1);if(!*destination)return fail(s->error,"Not enough memory for game resources.");memcpy(*destination,fork,fork_size);*length=fork_size;return 1;}
+    (void)type;
+    Span bytes={data,data_size};
+    if(mac_archive_kind(data,data_size,name)||
+       (has(bytes,1024,2)&&!memcmp(data+1024,"BD",2))||
+       (has(bytes,0,2)&&!memcmp(data,"ER",2))||
+       (has(bytes,512,2)&&!memcmp(data+512,"PM",2))||
+       (has(bytes,0,84)&&be16(data+82)==256))return collect_container(s,bytes,name);
+    return 1;
+}
+static int collect_hfs(Sources *sources, Span image) {
+    Error *e=sources->error;int ok=0;Byte *catalog=NULL,*ext=NULL;Hfs *h=calloc(1,sizeof(*h));
+    if(!h)return fail(e,"Not enough memory for the HFS catalog.");
+    h->error=e;
+    if(!volume_of(image,&h->volume,e)||!has(h->volume,1024,162))goto done;
+    const Byte *mdb=h->volume.p+1024;
+    h->block_size=be32(mdb+20);h->allocation_start=be16(mdb+28)*512;
+    if(h->block_size<512||h->block_size%512){fail(e,"Invalid HFS allocation block size.");goto done;}
+    unsigned ext_size=be32(mdb+130),cat_size=be32(mdb+146);
+    if(ext_size){ext=fork_of(h,ext_size,mdb+134,3,0);Span tree={ext,ext_size};if(!ext||!leaves(tree,overflow_record,h,e))goto done;}
+    catalog=fork_of(h,cat_size,mdb+150,4,0);Span tree={catalog,cat_size};
+    if(!catalog||!leaves(tree,catalog_record,h,e))goto done;
+    for(size_t i=0;i<h->file_count;i++){
+        GameFile *f=&h->files[i];Byte *fork=fork_of(h,f->rsrc_size,f->rsrc_ext,f->id,255),*data=NULL;
+        if(!fork)goto done;
+        if(f->color){data=fork_of(h,f->data_size,f->data_ext,f->id,0);if(!data){free(fork);goto done;}}
+        int accepted=collect_file(f->color?"Persia(COLOR)":"Application","APPL",data,f->color?f->data_size:0,fork,f->rsrc_size,sources);
+        free(data);free(fork);if(!accepted)goto done;
+    }
+    ok=1;
+ done:free(h);free(catalog);free(ext);return ok;
+}
+static int collect_container(Sources *s, Span data, const char *name) {
+    if(s->depth>=5)return fail(s->error,"Too many nested Macintosh containers.");
+    s->depth++;
+    /* An HFS/ISO bridge uses its Macintosh filesystem, preserving both forks.
+     * Plain ISO9660 is traversed in memory for disks or fork-preserving files. */
+    int is_hfs=(has(data,1024,2)&&!memcmp(data.p+1024,"BD",2))||
+               (has(data,0,2)&&!memcmp(data.p,"ER",2))||
+               (has(data,512,2)&&!memcmp(data.p+512,"PM",2))||
+               (has(data,0,84)&&data.p[0]<=63&&be16(data.p+82)==256);
+    int ok=is_hfs?collect_hfs(s,data):mac_archive_read(data.p,data.n,name,collect_file,s,s->error->text,s->error->size);
+    s->depth--;return ok;
+}
+static void free_sources(Sources *s){free(s->color);free(s->color_fork);free(s->application);}
+static int read_sources(const char *path, Sources *s) {
+    size_t size=0;Byte *image=read_file(path,(size_t)2147483648ULL,&size,s->error);
+    if(!image)return 0;
+    Span bytes={image,size};int ok=collect_container(s,bytes,path);free(image);
+    if(ok&&(!s->color||!s->application))return fail(s->error,"This file needs the Macintosh colour Prince of Persia application and Persia(COLOR) graphics, with resource forks preserved.");
     return ok;
+}
+int mac_import_source_bundle(const char *path, unsigned char **bundle, size_t *size, char *error, size_t error_size) {
+    Error e={error,error_size};Sources s={0};s.error=&e;*bundle=NULL;*size=0;if(error_size)error[0]=0;
+    if(!read_sources(path,&s)){free_sources(&s);return 0;}
+    size_t length=20+s.color_size+s.color_fork_size+s.application_size;Byte *out=malloc(length);
+    if(!out){free_sources(&s);return fail(&e,"Not enough memory for source forks.");}
+    memcpy(out,"POPMACS1",8);put32(out+8,s.color_size);put32(out+12,s.color_fork_size);put32(out+16,s.application_size);
+    memcpy(out+20,s.color,s.color_size);memcpy(out+20+s.color_size,s.color_fork,s.color_fork_size);
+    memcpy(out+20+s.color_size+s.color_fork_size,s.application,s.application_size);
+    free_sources(&s);*bundle=out;*size=length;return 1;
+}
+int mac_import_disk(const char *disk, const char *pack, char *error, size_t error_size) {
+    Error e={error,error_size};int ok=0;
+    if(error_size)error[0]=0;
+    Entry *entries=calloc(1640,sizeof(*entries));Sources sources={0};sources.error=&e;
+    if(!entries){fail(&e,"Not enough memory to import graphics.");goto done;}
+    if(!read_sources(disk,&sources))goto done;
+    Span color={sources.color,sources.color_size},cf={sources.color_fork,sources.color_fork_size},app={sources.application,sources.application_size},clut;
+    if(!resource(app,"clut",2000,&clut)||!build_entries(color,cf,clut,entries,&e))goto done;
+    ok=install_entries(entries,pack,&e);
+ done:
+    if(entries)for(unsigned i=0;i<1640;i++)free(entries[i].payload);
+    free(entries);free_sources(&sources);return ok;
 }
 
 int mac_import_pack_status(const char *pack) {
@@ -506,7 +558,7 @@ static char *joined(const char *base, const char *name) {
 }
 static int disk_name(const char *name) {
     const char *ext = strrchr(name, '.');
-    return ext && (!SDL_strcasecmp(ext, ".hfs") || !SDL_strcasecmp(ext, ".dsk") || !SDL_strcasecmp(ext, ".dc42"));
+    return ext && (!SDL_strcasecmp(ext, ".hfs") || !SDL_strcasecmp(ext, ".dsk") || !SDL_strcasecmp(ext, ".dc42") || !SDL_strcasecmp(ext, ".iso") || !SDL_strcasecmp(ext, ".hqx") || !SDL_strcasecmp(ext, ".sit"));
 }
 int mac_import_find_disk(const char *base, char **result) {
     int count = 0;

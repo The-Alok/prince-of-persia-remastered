@@ -157,6 +157,16 @@ static int mac_add_back_exact(short chtab_id, int id, int dx, int dy, int blit) 
 		draw_xh * 8 + dx, draw_main_y + 1 + dy, blit, -1, -1, 0);
 }
 
+/* Like the legacy draw_tile_right()'s explicit add_backtable calls, room
+ * decoration stays behind actors even during an airborne MID overlay. */
+static int mac_add_background_detail(short chtab_id, int id, int dx, int dy, int blit) {
+	int saved_mid = mac_back_to_mid;
+	mac_back_to_mid = 0;
+	int result = mac_add_back_exact(chtab_id, id, dx, dy, blit);
+	mac_back_to_mid = saved_mid;
+	return result;
+}
+
 static int mac_add_fore_exact(short chtab_id, int id, int dx, int dy, int blit) {
 	return mac_add_back_or_fore_exact(1, chtab_id, id,
 		draw_xh * 8 + dx, draw_main_y + 1 + dy, blit, -1, -1, 0);
@@ -503,7 +513,7 @@ static void mac_draw_left_other_overhang(void) {
 		case tiles_0_empty: {
 			static const byte ids[4] = {0, 0x7C, 0x7D, 0x7E};
 			static const sbyte offs[4] = {0, -20, -20, 0};
-			if (modifier_left < 4) mac_add_back_exact(id_chtab_6_environment, ids[modifier_left], 0, MAC_FLOOR_TOP_ANCHOR + offs[modifier_left], blitters_10h_transp);
+			if (modifier_left < 4) mac_add_background_detail(id_chtab_6_environment, ids[modifier_left], 0, MAC_FLOOR_TOP_ANCHOR + offs[modifier_left], blitters_10h_transp);
 		} break;
 		case tiles_1_floor: {
 			static const byte ids[4] = {0x2C, 0x7C, 0x2D, 0x2D};
@@ -514,9 +524,9 @@ static void mac_draw_left_other_overhang(void) {
 					right_anchor_y, blitters_10h_transp);
 			}
 			if (!mac_is_palace()) {
-				if (mod != 0) mac_add_back_exact(id_chtab_6_environment, ids[mod], 0, MAC_FLOOR_TOP_ANCHOR - 0x14, blitters_10h_transp);
+				if (mod != 0) mac_add_background_detail(id_chtab_6_environment, ids[mod], 0, MAC_FLOOR_TOP_ANCHOR - 0x14, blitters_10h_transp);
 			} else if (mod != 1) {
-				mac_add_back_exact(id_chtab_6_environment, ids[mod], 0, MAC_FLOOR_TOP_ANCHOR + 2, blitters_10h_transp);
+				mac_add_background_detail(id_chtab_6_environment, ids[mod], 0, MAC_FLOOR_TOP_ANCHOR + 2, blitters_10h_transp);
 			}
 		} break;
 		case tiles_7_doortop_with_floor:

@@ -9,6 +9,9 @@ import hashlib
 import json
 from pathlib import Path
 import struct
+import subprocess
+import tempfile
+import os
 
 
 def bounded(data, offset, size):
@@ -77,6 +80,32 @@ def hfs_volume(image):
 
 
 def hfs_files(disk, include=None):
+    if (disk.startswith((b'SIT!', b'StuffIt (c)')) or b'(This file must be converted with BinHex' in disk[:1024]
+            or disk[32769:32774] == b'CD001'):
+        # The same memory-only native decoder is used by the player launcher.
+        # Raw HFS/DC42/APM still use the independent stdlib Python reader below.
+        root = Path(__file__).resolve().parents[2]
+        launcher = root / ('prince.exe' if os.name == 'nt' else 'prince')
+        if not launcher.is_file():
+            raise ValueError('Build the native launcher first to decode HQX/SIT/ISO inputs (make -C src).')
+        with tempfile.TemporaryDirectory(prefix='mac-source-') as temporary:
+            source = Path(temporary) / 'input.bin'
+            source.write_bytes(disk)
+            result = subprocess.run([str(launcher), '--mac-source', str(source)], capture_output=True, timeout=120)
+        if result.returncode:
+            raise ValueError(result.stderr.decode('utf-8', errors='replace').strip())
+        bundle = result.stdout
+        if bundle[:8] != b'POPMACS1' or len(bundle) < 20:
+            raise ValueError('invalid native source bundle')
+        ds, rs, app = struct.unpack_from('<III', bundle, 8)
+        if len(bundle) != 20 + ds + rs + app:
+            raise ValueError('incomplete native source bundle')
+        # Normalised roles, not filesystem CNIDs: archives have no HFS catalog.
+        files = [dict(id=0, name='Persia(COLOR)', type='DATA', creator='????', components=['Persia(COLOR)'],
+                      data=bundle[20:20+ds], rsrc=bundle[20+ds:20+ds+rs]),
+                 dict(id=0, name='Prince of Persia', type='APPL', creator='????', components=['Prince of Persia'],
+                      data=b'', rsrc=bundle[20+ds+rs:])]
+        return [file for file in files if include is None or include(file)]
     disk = hfs_volume(disk)
     mdb = bounded(disk, 1024, 162)
     if mdb[:2] != b'BD':

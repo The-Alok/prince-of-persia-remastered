@@ -3,8 +3,8 @@
 CC = gcc
 RM = rm -f
 
-HFILES = common.h config.h data.h proto.h types.h pak.h mac_asset_import.h
-OBJ = main.o data.o seg000.o seg001.o seg002.o seg003.o seg004.o seg005.o seg006.o seg007.o seg008.o seg009.o pak.o seqtbl.o replay.o options.o lighting.o screenshot.o menu.o midi.o opl3.o stb_vorbis.o
+HFILES = common.h config.h data.h proto.h types.h pak.h mac_asset_import.h mac_archive.h video_filters.h
+OBJ = main.o data.o seg000.o seg001.o seg002.o seg003.o seg004.o seg005.o seg006.o seg007.o seg008.o seg009.o pak.o video_filters.o seqtbl.o replay.o options.o lighting.o screenshot.o menu.o midi.o opl3.o stb_vorbis.o
 BIN = ../prince
 ENGINE = ../runtime/prince-engine
 
@@ -26,7 +26,7 @@ seg008.o: mac_palace_palette.h
 seg006.o: mac_sword_table.h
 
 clean:
-	$(RM) $(OBJ) launcher.o mac_asset_import.o $(BIN) $(ENGINE)
+	$(RM) $(OBJ) launcher.o mac_asset_import.o mac_archive.o $(BIN) $(ENGINE)
 
 install:
 	./install.sh
@@ -38,11 +38,13 @@ $(ENGINE): $(OBJ)
 	mkdir -p ../runtime
 	$(CC) $(LDFLAGS) $(OBJ) -o $@ $(LIBS) -lm
 
-$(BIN): launcher.o mac_asset_import.o
-	$(CC) $(LDFLAGS) launcher.o mac_asset_import.o -o $@ $(LIBS) -lm
+$(BIN): launcher.o mac_asset_import.o mac_archive.o
+	$(CC) $(LDFLAGS) launcher.o mac_asset_import.o mac_archive.o -o $@ $(LIBS) -lm
 
 %.o: %.c $(HFILES)
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -c $<
 
 .PHONY: all clean
 
+
+mac_archive.o: third_party/libxad/stuffit.inc third_party/libxad/compress.inc

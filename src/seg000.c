@@ -20,6 +20,7 @@ The authors of this program may be contacted at https://forum.princed.org
 
 #include "common.h"
 #include "pak.h"
+#include "video_filters.h"
 #include <setjmp.h>
 #define _USE_MATH_DEFINES
 #include <math.h>
@@ -553,6 +554,7 @@ int process_key() {
 	const char* answer_text = NULL;
 	word need_show_text = 0;
 	int key = key_test_quit();
+	apply_visual_shortcuts();
 
 #ifdef USE_MENU
 	if (is_paused && is_menu_shown) {
@@ -2523,13 +2525,14 @@ const char* splash_text_2 =
 		"\n"
 		"Esc - Settings and quicksave menu.\n"
 		"F6 / F9 - Quicksave / quickload.\n"
+		"F7 - Pixel/Sharp/Soft/Smooth HQ.\n"
+		"F8 - Cycle graphics (in-game).\n"
 #ifdef USE_REPLAY
 		"Ctrl+Tab - Record a replay in-game.\n"
 		"Tab - View replays on the title screen.\n"
 #endif
 		"\n"
 		"Read README.md for this version.\n"
-		"\n"
 		"Built on SDLPoP " SDLPOP_VERSION ".\n"
 		"\n"
 		"Press any key to continue...";

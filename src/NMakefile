@@ -1,5 +1,5 @@
 
-OBJ = main.obj data.obj seg000.obj seg001.obj seg002.obj seg003.obj seg004.obj seg005.obj seg006.obj seg007.obj seg008.obj seg009.obj pak.obj seqtbl.obj replay.obj options.obj lighting.obj screenshot.obj menu.obj midi.obj opl3.obj stb_vorbis.c
+OBJ = main.obj data.obj seg000.obj seg001.obj seg002.obj seg003.obj seg004.obj seg005.obj seg006.obj seg007.obj seg008.obj seg009.obj pak.obj video_filters.obj seqtbl.obj replay.obj options.obj lighting.obj screenshot.obj menu.obj midi.obj opl3.obj stb_vorbis.c
 
 sdl = "..\SDL2-2.0.4"
 LIBS = $(sdl)\lib\x86\SDL2main.lib $(sdl)\lib\x86\SDL2.lib $(sdl)\lib\x86\SDL2_image.lib
@@ -23,8 +23,8 @@ prince-engine.exe: $(OBJ)
 	@if not exist ..\runtime mkdir ..\runtime
 	$(link) $(ldebug) $(conflags) -out:..\runtime\prince-engine.exe $(conlibs) $(OBJ) $(LIBS)
 
-prince.exe: launcher.obj mac_asset_import.obj
-	$(link) $(ldebug) $(conflags) -out:..\prince.exe $(conlibs) launcher.obj mac_asset_import.obj $(LIBS) comdlg32.lib
+prince.exe: launcher.obj mac_asset_import.obj mac_archive.obj
+	$(link) $(ldebug) $(conflags) -out:..\prince.exe $(conlibs) launcher.obj mac_asset_import.obj mac_archive.obj $(LIBS) comdlg32.lib
 
 clean:
 	del *.obj prince.exe

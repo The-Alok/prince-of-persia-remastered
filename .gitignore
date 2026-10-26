@@ -117,7 +117,11 @@ screenshots/
 /tools/mac_native_renderer/manifest.csv
 /tools/mac_color_port/build_report.json
 /MAC_NATIVE_SHA256SUMS.txt
-*.hfs
-*.dsk
-*.dc42
+*.[hH][fF][sS]
+*.[dD][sS][kK]
+*.[dD][cC]42
+*.[hH][qQ][xX]
+*.[sS][iI][tT]
+*.[sS][iI][tT][xX]
+*.[iI][sS][oO]
 *_macgroup*.png

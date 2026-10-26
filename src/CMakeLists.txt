@@ -73,6 +73,8 @@ set(SOURCE_FILES
         seg009.c
         pak.c
         pak.h
+        video_filters.c
+        video_filters.h
         seqtbl.c
         options.c
         midi.c opl3.c opl3.h
@@ -88,7 +90,7 @@ if (NOT(APPLE AND CREATE_BUNDLE))
     if(NOT PSP)
         add_executable(prince-engine ${SOURCE_FILES})
         set_target_properties(prince-engine PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${SDLPoP_SOURCE_DIR}/../runtime")
-        add_executable(prince launcher.c mac_asset_import.c icon.rc)
+        add_executable(prince launcher.c mac_asset_import.c mac_archive.c icon.rc)
     else()
         add_executable(prince ${SOURCE_FILES})
     endif()
@@ -127,6 +129,7 @@ if(NOT WIN32 AND NOT APPLE AND NOT PSP)
     include(FindPkgConfig)
     pkg_check_modules(LAUNCHER_SDL2 REQUIRED sdl2)
     target_include_directories(prince PRIVATE ${LAUNCHER_SDL2_INCLUDE_DIRS})
+    target_include_directories(prince-engine PRIVATE ${LAUNCHER_SDL2_INCLUDE_DIRS})
 endif()
 
 if(WIN32)

@@ -54,6 +54,8 @@ def main():
     for name in ('gameplay-level1-mac.png', 'gameplay-mac.png',
                  'graphics-packs.png', 'graphics-packs-level1.png', 'welcome.png'):
         add(ROOT/'doc/images'/name)
+    for name in ('COPYING.LIB', 'PROVENANCE'):
+        add(ROOT/'src/third_party/libxad'/name, 'licenses/libxad/'+name)
     # The launcher contains the importer. Python tools stay in the source tree;
     # neither an interpreter nor the player's generated Mac pack is bundled.
     # A checked inventory prevents local Mac imports/dumps (or user mods) from

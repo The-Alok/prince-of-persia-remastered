@@ -352,6 +352,64 @@ static void check_airborne_overlay(void) {
 	printf("PASS: %d airborne overlay cases plus exposed-neighbor actor ordering\n", cases);
 }
 
+/* Background cracks must survive redraws without covering an airborne actor.
+ * Compare the real moving compositor with an independent background + actor
+ * composition in an otherwise empty shaft. Both facings and all three native
+ * crack modifiers cross each row; peels are restored between consecutive poses. */
+static void check_background_cracks(const char *folder) {
+    int cases=0, overlaps=0;
+    for (int mod=1;mod<=4;mod++) for (int facing=0;facing<2;facing++) {
+        int actor_x=112, room=1;
+        free_peels();
+        if(mod==4) { /* Actual Level 1 room 1 right-hand shaft from the reported scene. */
+            load_level();actor_x=156;room=1;
+        } else {
+            memset(level.fg,0,sizeof(level.fg));memset(level.bg,mod,sizeof(level.bg));
+            memset(level.roomlinks,0,sizeof(level.roomlinks));
+        }
+        drawn_room=room;load_room_links();get_room_address(room);
+        mobs_count=trobs_count=0;Guard.direction=dir_56_none;
+        current_target_surface=offscreen_surface;draw_rect(&rect_top,color_0_black);
+        redraw_room();__real_draw_tables();
+        for (int row=0;row<(mod==4?1:3);row++) for (int step=0;step<5;step++) {
+            current_target_surface=offscreen_surface;restore_peels();
+            clear_tile_wipes();memset(table_counts,0,sizeof(table_counts));reset_obj_clip();
+            Kid=(char_type){0};Kid.room=room;Kid.curr_row=mod==4?2:row;Kid.x=actor_x;
+            Kid.y=Kid.curr_row*63+18+step*10;Kid.frame=106;Kid.charid=charid_0_kid;
+            Kid.action=actions_4_in_freefall;Kid.direction=facing?dir_FF_left:dir_0_right;
+            Kid.alive=-1;Kid.sword=sword_0_sheathed;
+            char_type before=Kid;dword seed=random_seed;
+            SDL_Surface *background=SDL_ConvertSurface(offscreen_surface,offscreen_surface->format,0);assert(background);
+            draw_moving();
+            SDL_Surface *expected=SDL_ConvertSurface(background,background->format,0);assert(expected);
+            current_target_surface=expected;set_clip_rect(&rect_top);
+            int actors=0;
+            for(int i=0;i<midtable_count;i++) if(midtable[i].chtab_id==id_chtab_2_kid) {
+                byte peel=midtable[i].peel;midtable[i].peel=0;draw_mid(i);midtable[i].peel=peel;actors++;
+            }
+            assert(actors==1);__real_draw_tables();
+            int different=0;
+            for(int y=0;y<384;y++)for(int x=0;x<640;x++) {
+                /* In the real room compare the open shaft, leaving its solid
+                 * upper wall and floor occluders to the retained fall tests. */
+                if(mod==4&&(x<384||x>=512||y<252||y>=368))continue;
+                Uint32 want=read_rgb(expected,x,y), base=read_rgb(background,x,y);
+                if(want!=base && base!=0)overlaps++;
+                if(read_rgb(offscreen_surface,x,y)!=want)different++;
+            }
+            if(different)fprintf(stderr,"CRACK OVERLAY mod%d facing%d row%d step%d: %d wrong pixels\n",mod,facing,row,step,different);
+            if(folder&&(mod==1||mod==4)&&!facing&&row==0) {
+                char path[1024];snprintf(path,sizeof(path),"%s/%sshaft-cracks-fall-%d.png",folder,mod==4?"level1-":"",step);
+                assert(IMG_SavePNG(offscreen_surface,path)==0);
+            }
+            assert(different==0);assert(memcmp(&before,&Kid,sizeof(Kid))==0&&seed==random_seed);
+            SDL_FreeSurface(background);SDL_FreeSurface(expected);cases++;
+        }
+    }
+    assert(overlaps>0);
+    printf("PASS: %d falling shaft compositions; %d actor/background overlap pixels, cracks stay behind both facings\n",cases,overlaps);
+}
+
 static void check_fall_sequence(const char* folder) {
 	Uint32 expected[5][2];
 	for (int frame = 102; frame <= 106; ++frame) {
@@ -380,6 +438,7 @@ void __wrap_draw_tables(void) {
 		check_sequence(getenv("SDLPOP_CLIMB_TEST_OUTPUT"));
 		check_airborne_overlay();
 		check_fall_sequence(getenv("SDLPOP_CLIMB_TEST_OUTPUT"));
+		check_background_cracks(getenv("SDLPOP_CLIMB_TEST_OUTPUT"));
 		if (getenv("SDLPOP_FLOOR_AUDIT")) check_interactive_floors(getenv("SDLPOP_CLIMB_TEST_OUTPUT"));
 		if (getenv("SDLPOP_ARCHITECTURE_AUDIT")) check_animated_architecture(getenv("SDLPOP_CLIMB_TEST_OUTPUT"));
 		if (getenv("SDLPOP_PALACE_AUDIT")) check_palace_walls(getenv("SDLPOP_CLIMB_TEST_OUTPUT"));

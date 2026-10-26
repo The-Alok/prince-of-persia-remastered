@@ -1,0 +1,9 @@
+Selected StuffIt decompression routines from libxad, LGPL-2.1-or-later.
+Original copyright notices retained in stuffit.inc.
+Source: https://github.com/ashang/libxad
+Commit: dbe67a865207e49cd917ad9170a11b9eaa83998a
+Paths: libxad/portable/clients/StuffIt.c and xadIO_Compress.c
+compress.inc retains the UNIX Compress decoder from xadIO_Compress.c.
+Local changes: memory-only adapter, bounds checks, omitted archive/UI/platform code.
+Modifications and adapter are supplied in this source tree under GPL-3.0-or-later;
+original routines remain available under their LGPL terms. No game assets.

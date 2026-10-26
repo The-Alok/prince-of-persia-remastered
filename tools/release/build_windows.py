@@ -66,10 +66,10 @@ def main():
     engine.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run([compiler, '-mwindows', '-static-libgcc', *[str(objects / name) for name in names],
                     str(objects / 'icon.o'), '-o', str(engine), *libraries], check=True)
-    for name in ('launcher.o', 'mac_asset_import.o'):
+    for name in ('launcher.o', 'mac_asset_import.o', 'mac_archive.o'):
         compile_one(name)
     subprocess.run([compiler, '-mwindows', '-static-libgcc', str(objects/'launcher.o'),
-                    str(objects/'mac_asset_import.o'), str(objects/'icon.o'),
+                    str(objects/'mac_asset_import.o'), str(objects/'mac_archive.o'), str(objects/'icon.o'),
                     '-o', str(binary), *libraries, '-lcomdlg32'], check=True)
     available = {path.name.lower(): path for folder in dll_dirs for path in folder.glob('*.dll')}
     pending, copied, system = [binary, engine], set(), set()

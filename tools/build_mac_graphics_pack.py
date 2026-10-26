@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Build the optional Macintosh pack from your own colour Prince of Persia disk.
 
-Accepts classic-HFS .hfs/.dsk volumes, Disk Copy 4.2 and Apple Partition Maps.
+Accepts classic-HFS .hfs/.dsk volumes, Disk Copy 4.2, Apple Partition Maps,
+HQX/SIT archives and ISO images. Archive inputs use the built native launcher.
 Reads the image without mounting it, executing it, or downloading anything.
 Only graphics and their origins are extracted; the port retains its DOS data.
 """
@@ -142,7 +143,7 @@ def write_pack(path, content, force=False):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('disk', type=Path, help='your Macintosh colour-game .hfs or .dsk image')
+    parser.add_argument('disk', type=Path, help='your Macintosh colour-game .hfs/.dsk/.dc42/.iso/.hqx/.sit file')
     parser.add_argument('--output', type=Path, default=ROOT / 'data/res_mac_native_full.pak')
     optional = parser.add_mutually_exclusive_group()
     optional.add_argument('--source-output', type=Path, help='also write local PNGs/origins (requires Pillow; empty directory)')

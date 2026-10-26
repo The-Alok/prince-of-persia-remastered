@@ -26,7 +26,7 @@ int __real_SDL_PollEvent(SDL_Event*);
 void __real_SDL_RenderPresent(SDL_Renderer*);
 SDL_Window* __real_SDL_CreateWindow(const char*,int,int,int,int,Uint32);
 static int frames,stage,offset,ready,saved,quit_sent;
-SDL_Window* __wrap_SDL_CreateWindow(const char*t,int x,int y,int w,int h,Uint32 flags){const char*m=getenv("UI_TEST_MODE");if(m&&!strcmp(m,"other-small")){w/=2;h/=2;}return __real_SDL_CreateWindow(t,x,y,w,h,flags);}
+SDL_Window* __wrap_SDL_CreateWindow(const char*t,int x,int y,int w,int h,Uint32 flags){const char*folder=getenv("UI_CAPTURE_DIR");if(folder){char marker[4096];SDL_snprintf(marker,sizeof(marker),"%s/window-opened.txt",folder);FILE*f=fopen(marker,"w");if(f){fputs("1",f);fclose(f);}}const char*m=getenv("UI_TEST_MODE");if(m&&!strcmp(m,"other-small")){w/=2;h/=2;}return __real_SDL_CreateWindow(t,x,y,w,h,flags);}
 static void capture(SDL_Surface *s,const char *name) {
  const char *folder=getenv("UI_CAPTURE_DIR");if(!folder)return;
  char path[4096];SDL_snprintf(path,sizeof(path),"%s/%s.png",folder,name);IMG_SavePNG(s,path);
@@ -81,6 +81,7 @@ int main(int argc,char**argv){char e[512];if(argc!=3)return 2;int ok=mac_import_
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--disk', type=Path)
+    parser.add_argument('--archive', type=Path, action='append', default=[])
     parser.add_argument('--output', type=Path, default=ROOT/'screenshots/launcher-v1.0.1')
     args = parser.parse_args()
     output = args.output.resolve()
@@ -93,9 +94,9 @@ def main():
         (work/'import.c').write_text(IMPORT)
         compiler = ['/usr/bin/gcc', '-D_GNU_SOURCE=1', '-std=c99', '-O1', '-g', '-Wall', '-Wextra', '-I'+str(ROOT/'src')]
         subprocess.run([*compiler, '-Dmain=launcher_entry', '-c', str(ROOT/'src/launcher.c'), '-o', str(work/'launcher.o'), *flags], check=True)
-        subprocess.run([*compiler, str(work/'harness.c'), str(work/'launcher.o'), str(ROOT/'src/mac_asset_import.c'), '-Wl,--wrap=SDL_RenderPresent', '-Wl,--wrap=SDL_PollEvent', '-Wl,--wrap=SDL_CreateWindow', '-o', str(work/'ui'), *flags], check=True)
+        subprocess.run([*compiler, str(work/'harness.c'), str(work/'launcher.o'), str(ROOT/'src/mac_asset_import.c'), str(ROOT/'src/mac_archive.c'), '-Wl,--wrap=SDL_RenderPresent', '-Wl,--wrap=SDL_PollEvent', '-Wl,--wrap=SDL_CreateWindow', '-o', str(work/'ui'), *flags], check=True)
         subprocess.run([*compiler, str(work/'engine.c'), '-o', str(work/'engine')], check=True)
-        subprocess.run([*compiler, str(work/'import.c'), str(ROOT/'src/mac_asset_import.c'), '-o', str(work/'importer'), *flags], check=True)
+        subprocess.run([*compiler, str(work/'import.c'), str(ROOT/'src/mac_asset_import.c'), str(ROOT/'src/mac_archive.c'), '-o', str(work/'importer'), *flags], check=True)
         total = 0
 
         def game(name):
@@ -111,6 +112,8 @@ def main():
             captures = output/folder.name
             captures.mkdir(exist_ok=True)
             result = folder/'result.txt'
+            window_marker = captures/'window-opened.txt'
+            window_marker.unlink(missing_ok=True)
             env = dict(os.environ, SDL_VIDEODRIVER='dummy', SDL_AUDIODRIVER='dummy', SDL_RENDER_DRIVER='software',
                        UI_TEST_MODE=mode, UI_TEST_DISK=str(disk or ''), UI_CAPTURE_DIR=str(captures),
                        UI_TEST_RESULT=str(result), PATH='/no-interpreter-needed', HOME=str(work))
@@ -119,7 +122,11 @@ def main():
             if expect_game:
                 text = result.read_text()
                 assert f'cwd={folder}' in text and f'arg0={folder}/prince' in text
-                assert f'arg1=graphics={"dos" if mode.startswith("other") else "mac_native_full"}' in text
+                if mode == 'cached':
+                    assert 'arg1=' not in text and not window_marker.exists()
+                else:
+                    assert f'arg1=graphics={"dos" if mode.startswith("other") else "mac_native_full"}' in text
+                    assert window_marker.exists()
             total += 1
 
         missing = game('missing-image')
@@ -174,6 +181,15 @@ def main():
             run(automatic, 'automatic')
             assert (automatic/'data/res_mac_native_full.pak').read_bytes() == expected
             assert hashlib.sha256(args.disk.read_bytes()).digest() == hashlib.sha256(image).digest()
+        for index, archive in enumerate(args.archive):
+            folder = game(f'archive-{index}')
+            shutil.copy2(archive, folder/archive.name)
+            run(folder, 'automatic')
+            pack = folder/'data/res_mac_native_full.pak'
+            assert pack.exists()
+            if args.disk:
+                assert pack.read_bytes() == expected
+            run(folder, 'cached')
         print(f'PASS: {total} launcher/import scenarios; actual UI captures: {output}')
 
 

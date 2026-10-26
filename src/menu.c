@@ -20,6 +20,7 @@ The authors of this program may be contacted at https://forum.princed.org
 
 #include "common.h"
 #include "pak.h"
+#include "video_filters.h"
 
 #ifdef USE_MENU
 
@@ -359,7 +360,7 @@ setting_type general_settings[] = {
 };
 
 NAMES_LIST(use_hardware_acceleration_setting_names, {"OFF", "ON", "AUTO",});
-NAMES_LIST(scaling_type_setting_names, {"Sharp", "Fuzzy", "Blurry",});
+NAMES_LIST(scaling_type_setting_names, {"Pixel", "Sharp", "Soft", "Smooth HQ",});
 
 int integer_scaling_possible =
 #if SDL_VERSION_ATLEAST(2,0,5) // SDL_RenderSetIntegerScale
@@ -372,7 +373,7 @@ int integer_scaling_possible =
 setting_type visuals_settings[] = {
 		{.id = SETTING_GRAPHICS_PACK, .style = SETTING_STYLE_NUMBER, .number_type = SETTING_BYTE,
 				.min = 0, .max = 3, .linked = &graphics_pack_index, .required = &multiple_paks_available,
-				.text = "Graphics pack",
+				.text = "Graphics pack (F8)",
 				.explanation = "Mac Native FULL - Native Macintosh rooms, actors and cutscenes (default).\nDOS - Classic PC graphics.\nSNES 1 - Recoloured Prince variant.\nSNES 2 - Alternative SNES graphics.\nSNES 3 - Base SNES graphics."},
 		{.id = SETTING_FULLSCREEN, .style = SETTING_STYLE_TOGGLE, .linked = &start_fullscreen,
 				.text = "Start fullscreen",
@@ -394,12 +395,10 @@ setting_type visuals_settings[] = {
 				.explanation = "Enable pixel perfect scaling. That is, make all pixels the same size by forcing integer scale factors.\n"
 						"Combining with 4:3 aspect ratio requires at least 1600x1200."
 						"\nYou need to compile with SDL 2.0.5 or newer to enable this."},
-		{.id = SETTING_SCALING_TYPE, .style = SETTING_STYLE_NUMBER, .number_type = SETTING_BYTE, .max = 2,
+		{.id = SETTING_SCALING_TYPE, .style = SETTING_STYLE_NUMBER, .number_type = SETTING_BYTE, .max = VIDEO_FILTER_COUNT - 1,
 				.linked = &scaling_type, .names_list = &scaling_type_setting_names_list,
-				.text = "Scaling method",
-				.explanation = "Sharp - Use nearest neighbour resampling.\n"
-						"Fuzzy - First upscale to double size, then use smooth scaling.\n"
-						"Blurry - Use smooth scaling."},
+				.text = "Picture shader (F7)",
+				.explanation = "F7 cycles the picture shader.\nPixel - Nearest-neighbour pixels.\nSharp - Crisp integer upscale with soft edges.\nSoft - Bilinear filtering.\nSmooth HQ - Scale3x edge smoothing."},
 #ifdef USE_FADE
 		{.id = SETTING_ENABLE_FADE, .style = SETTING_STYLE_TOGGLE, .linked = &enable_fade,
 				.text = "Fading enabled",
@@ -1401,6 +1400,11 @@ void draw_pause_menu(void) {
 	for (int i = 0; i < COUNT(pause_menu_items); ++i) {
 		draw_pause_menu_item(&pause_menu_items[i], &pause_rect_inner, &y_offset, color_15_brightwhite);
 	}
+	char shortcuts[128];
+	const char *pack = num_available_paks ? available_paks[graphics_pack_index].name : "Default";
+	snprintf(shortcuts, sizeof(shortcuts), "F7 Shader: %s\nF8 Graphics: %s", video_filter_name(), pack);
+	rect_type shortcut_rect = {159, 4, 187, 316};
+	show_text_with_color(&shortcut_rect, halign_center, valign_top, shortcuts, color_7_lightgray);
 }
 
 bool were_settings_changed;

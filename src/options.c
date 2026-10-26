@@ -97,6 +97,7 @@ NAMES_LIST(tile_type_names, {
 				"torch_with_debris", // 30
 });
 NAMES_LIST(scaling_type_names, {"sharp", "fuzzy", "blurry"});
+NAMES_LIST(visual_shader_names, {"pixel", "sharp", "soft", "smooth_hq"});
 NAMES_LIST(row_names, {"top", "middle", "bottom"});
 KEY_VALUE_LIST(direction_names, {{"left", dir_FF_left}, {"right", dir_0_right}});
 NAMES_LIST(entry_pose_names, {"turning", "falling", "running"});
@@ -197,6 +198,7 @@ static int global_ini_callback(const char *section, const char *name, const char
 		process_boolean("use_correct_aspect_ratio", &use_correct_aspect_ratio);
 		process_boolean("use_integer_scaling", &use_integer_scaling);
 		process_byte("scaling_type", &scaling_type, &scaling_type_names_list);
+		process_byte("visual_shader", &scaling_type, &visual_shader_names_list);
 		process_boolean("enable_controller_rumble", &enable_controller_rumble);
 		process_boolean("joystick_only_horizontal", &joystick_only_horizontal);
 		process_int("joystick_threshold", &joystick_threshold, NULL);

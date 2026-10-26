@@ -47,34 +47,39 @@ application resource forks or pixel-reference fixtures**. Generate the optional
 Macintosh pack locally from your own Macintosh colour edition of Prince of
 Persia. The generated files are ignored by Git and excluded from new packages.
 
-Use a disk image from a copy you are entitled to use, containing the Macintosh
-colour application and `Persia(COLOR)` graphics file. Both `PoP1.hfs` and
-`PoP1.dsk` filenames are accepted: the importer detects raw classic HFS,
-Disk Copy 4.2 and Apple Partition Map formats from their contents. HFS+,
-compressed images and flux captures are not supported. A renamed file alone
-does not convert its format. No game files are downloaded or executed.
+Use a copy you are entitled to use, containing the Macintosh colour application
+and `Persia(COLOR)` graphics file, with its Macintosh resource forks preserved.
+The launcher accepts **HFS, DSK, DC42, HQX, SIT and ISO** files. It detects raw
+classic HFS, Disk Copy 4.2 and Apple Partition Map images from their contents;
+BinHex/StuffIt archives unpack automatically in memory, including nested disks.
+ISO support covers classic HFS/ISO bridges and ISO9660 discs containing a game
+disk or files with AppleDouble resource forks. A DOS-only CD, HFS+ volume or
+incomplete archive cannot supply the Macintosh artwork. Password-protected
+archives, StuffIt X and installer-specific compression are unsupported.
+No game files are downloaded, mounted or executed.
 
 ### Start with the launcher
 
 1. Extract the complete game download into a folder you can write to.
-2. Copy your `PoP1.hfs` or `PoP1.dsk` image into the same folder as `prince.exe`
+2. Copy one supported game image/archive into the same folder as `prince.exe`
    (Windows) or `prince` (Linux). Or use **Browse for image** in the launcher.
+   If several are present, Browse lets you select the one to import.
 3. Open `prince.exe` on Windows, or run `./prince` on Linux. The launcher finds
-   the image and prepares the graphics automatically. When **Graphics ready**
-   turns green, click **Play**.
+   the image and prepares the graphics automatically, then opens the game.
+   Later launches go straight to the game when the graphics are already ready.
 
-The two status lights show whether a disk image is selected and whether the
-Macintosh graphics are ready. The launcher remembers a browsed image and
-reuses the prepared graphics on later launches. No Python installation or
-extraction commands are needed. The disk image is read-only; nothing is
-mounted, downloaded or executed from it.
+The setup window appears only when graphics need preparing. Its status lights
+show whether a disk image is selected and whether the graphics are ready. It
+remembers a browsed image and reuses the prepared graphics automatically. The
+disk image is read-only; nothing is mounted, downloaded or executed from it.
 
 The game executable lives in `runtime/`; open the launcher in the main folder.
-**Other graphics** starts the game with the installed alternatives. You can
+**Play DOS Mode** starts the game without importing Macintosh graphics. You can
 switch packs in the game's Visual settings.
 
 Without an imported Mac pack, the game builds and runs with the bundled DOS
-and SNES packs. The launcher selects Macintosh when you press Play after preparing it. The screenshots below illustrate
+and SNES packs. The first successful import starts in Macintosh mode; later
+launches remember your in-game graphics choice. The screenshots above illustrate
 the optional Macintosh pack alongside the other graphics options.
 
 **Historical release notice:** the previously published v1.0.0 downloads and
@@ -84,15 +89,18 @@ the historical v1.0.0 downloads do not yet include it. Their cleanup and a new
 public release remain separate steps.
 
 
+## Next release: v1.0.1
 
-## Download and play
-
-Download the appropriate archive from [Releases](https://github.com/The-Alok/prince-of-persia-remastered/releases).
+The v1.0.1 builds below are the next release targets. They include automatic
+Macintosh setup, HQX/SIT/ISO import, direct startup after setup, the F7/F8 display
+controls, and corrected background-brick layering while falling.
+They are not yet published on [Releases](https://github.com/The-Alok/prince-of-persia-remastered/releases);
+the historical v1.0.0 downloads remain separate until release cleanup is approved.
 
 | Platform | Download | Start |
 | --- | --- | --- |
-| Windows x64 | `prince-of-persia-remastered-v1.0.0-windows-x86_64.zip` | Extract everything, then double-click `prince.exe` |
-| Linux x64 | `prince-of-persia-remastered-v1.0.0-linux-x86_64.tar.gz` | Extract, then run `./launch.sh` or `./prince` |
+| Windows x64 | `prince-of-persia-remastered-v1.0.1-windows-x86_64.zip` | Extract everything, then double-click `prince.exe` |
+| Linux x64 | `prince-of-persia-remastered-v1.0.1-linux-x86_64.tar.gz` | Extract, then run `./launch.sh` or `./prince` |
 
 Windows includes the required SDL runtime DLLs; keep them beside `prince.exe`.
 Linux uses the system SDL2 and SDL2_image libraries. On Debian/Ubuntu:
@@ -116,9 +124,12 @@ build from source. Steam Deck compatibility has not been certified.
 - Optional locally generated **Mac Native FULL v1.0.1**, first in the menu
   and preferred at startup when installed.
 
-Switch between installed packs on the fly in Settings → Visuals → Graphics
-pack; no restart is needed. Restart only after installing a newly generated
-pack so it can be discovered.
+F7 cycles picture shaders: **Pixel** (nearest-neighbour), **Sharp** (crisp
+integer prescaling), **Soft** (bilinear), and **Smooth HQ** (Scale3x edge
+smoothing). F8 cycles the installed graphics packs during play or pause. The
+pause menu shows the current shader and pack. Both choices are also available
+in Settings → Visuals and are remembered between launches. Display shortcuts
+do not skip story screens, advance animation or change movement/collision.
 
 SDLPoP gameplay, collision, animation timing and replay logic are preserved.
 
@@ -129,6 +140,8 @@ SDLPoP gameplay, collision, animation timing and replay logic are preserved.
 - Shift: grab, careful steps and sword action.
 - Esc: menu/settings; F6/F9: quicksave/quickload.
 - Ctrl+Tab: record a replay; Tab on the title screen: replay browser.
+- **F7**: cycle picture shaders — Pixel → Sharp → Soft → Smooth HQ.
+- **F8**: cycle installed graphics packs while playing or paused.
 - Alt+Enter: fullscreen toggle.
 
 Edit `SDLPoP.ini` or use Settings → Visuals. The default remains
@@ -165,12 +178,16 @@ v1.0.0 is the [v1.0.0 tag](https://github.com/The-Alok/prince-of-persia-remaster
 <summary>Optional Macintosh renderer tests</summary>
 
 Developers can still use `tools/build_mac_graphics_pack.py` for a manual import.
-The normal player launcher needs no Python. The format/safety tests do not
+HQX/SIT/ISO developer imports use the built native launcher; raw HFS imports
+remain available through the independent Python reader. The format/safety tests do not
 require game assets:
 
 ```sh
 python3 tools/test_mac_disk_import.py
+python3 tools/test_mac_archives.py
 python3 tools/test_launcher.py
+# After building, with locally generated Macintosh resources:
+python3 tools/mac_native_renderer/test_display_controls.py
 ```
 
 For image/renderer regression, install Pillow and generate private fixtures
@@ -298,6 +315,16 @@ Contributors:
 Usernames on the list above refer to either GitHub users or users from `forum.princed.org`.
 
 </details>
+
+Smooth HQ implements the [Scale3x algorithm](https://www.scale2x.it/algorithm)
+from the Scale2x project by Andrea Mazzoleni. The four picture-filter styles
+were referenced against the user-supplied PoP2 Mac build; its code and game
+assets are not bundled with this project.
+
+The built-in StuffIt decoder adapts routines from **libxad** by Dirk Stöcker,
+Dik T. Winter and Matthew T. Russotto, under LGPL-2.1-or-later. Its original
+notices, corresponding source and local changes are in
+[`src/third_party/libxad/`](src/third_party/libxad/); downloads include the license.
 
 Source is **GPL-3.0-or-later**; see [COPYING](COPYING) and the original copyright
 and license notices preserved in the source files. Original game artwork and
