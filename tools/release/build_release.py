@@ -51,7 +51,8 @@ def main():
     # enter downloads merely because they still exist in the working tree.
     for name in ('SDLPoP.ini', 'COPYING', 'README.md'):
         add(ROOT/name)
-    for name in ('graphics-packs.png', 'graphics-packs-level1.png', 'welcome.png'):
+    for name in ('gameplay-level1-mac.png', 'gameplay-mac.png',
+                 'graphics-packs.png', 'graphics-packs-level1.png', 'welcome.png'):
         add(ROOT/'doc/images'/name)
     # Ship the importer, never the player's generated Macintosh pack or dumps.
     for name in ('tools/build_mac_graphics_pack.py',

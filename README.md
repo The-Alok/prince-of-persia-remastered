@@ -22,11 +22,6 @@ application resource forks or pixel-reference fixtures**. Generate the optional
 Macintosh pack locally from your own Macintosh colour edition of Prince of
 Persia. The generated files are ignored by Git and excluded from new packages.
 
-**DOS and the three SNES packs remain bundled unchanged.** The engine source
-and those assets retain their separate provenance and licensing. The disk
-requirement applies to Macintosh graphics; this change does not establish
-redistribution rights for the other packs.
-
 Use a disk image from a copy you are entitled to use, containing the Macintosh
 colour application and `Persia(COLOR)` graphics file. Both `PoP1.hfs` and
 `PoP1.dsk` filenames are accepted: the importer detects raw classic HFS,
@@ -54,9 +49,8 @@ requires an explicit `--force`. The input disk is opened read-only.
 
 Without an imported Mac pack, the game builds and runs with the bundled DOS
 and SNES packs. The INI prefers Macintosh when its generated pack is installed,
-and otherwise the selector starts with DOS. This change concerns Macintosh
-resource distribution; it does not guarantee copyright clearance. Documentation
-screenshots of the Mac pack are also kept out of the current source tree.
+and otherwise the selector starts with DOS. The screenshots below illustrate
+the optional Macintosh pack alongside the other graphics options.
 
 **Historical release notice:** the previously published v1.0.0 downloads and
 older Git history still contain Macintosh assets until their separate cleanup
@@ -65,7 +59,17 @@ the current source, not those historical archives.
 
 ## Gameplay screenshots
 
-### DOS and SNES graphics packs
+### Mac Native FULL
+
+**Dungeon — Level 1**
+
+![Mac Native FULL gameplay in the Level 1 dungeon](doc/images/gameplay-level1-mac.png)
+
+**Palace — Level 5**
+
+![Mac Native FULL gameplay in the palace](doc/images/gameplay-mac.png)
+
+### Other graphics packs
 
 Each grid shows **DOS, SNES 1, SNES 2 and SNES 3**, in that order.
 
