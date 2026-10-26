@@ -18,25 +18,26 @@ platform builds while retaining SDLPoP's gameplay foundation.
 
 ### Mac Native FULL
 
-**Palace — Level 5**
-
-![Mac Native FULL gameplay in the palace](doc/images/gameplay-mac.png)
-
 **Dungeon — Level 1**
 
 ![Mac Native FULL gameplay in the Level 1 dungeon](doc/images/gameplay-level1-mac.png)
+
+**Palace — Level 5**
+
+![Mac Native FULL gameplay in the palace](doc/images/gameplay-mac.png)
 
 ### Other graphics packs
 
 Each grid shows **DOS, SNES 1, SNES 2 and SNES 3**, in that order.
 
+**Dungeon — Level 1**
+
+![DOS and all three SNES packs in the same Level 1 dungeon scene](doc/images/graphics-packs-level1.png)
+
 **Palace — Level 5**
 
 ![DOS and all three SNES packs in the same palace scene](doc/images/graphics-packs.png)
 
-**Dungeon — Level 1**
-
-![DOS and all three SNES packs in the same Level 1 dungeon scene](doc/images/graphics-packs-level1.png)
 
 ## Download and play
 
