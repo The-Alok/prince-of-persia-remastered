@@ -2,9 +2,10 @@
 
 ## Prince of Persia Remastered
 
-Project maintained by [The-Alok](https://github.com/The-Alok). This version adds
-the native Macintosh graphics renderer, composition fixes and reference audits
-to SDLPoP. The original game's gameplay foundation is SDLPoP.
+Independent project maintained by [The-Alok](https://github.com/The-Alok).
+This is a modified version of SDLPoP with a custom native Macintosh graphics
+renderer, composition fixes, platform builds and reference audits. SDLPoP
+remains the engine and gameplay foundation.
 
 ## SDLPoP engine
 

@@ -1,9 +1,18 @@
 # Prince of Persia Remastered v1.0.0
 
-An unofficial Prince of Persia fan project bringing the original Macintosh
-colour artwork to a native **640×400 renderer**, built on
+**A Macintosh HD graphics port for Windows and Linux, with a custom native
+640×400 renderer and 2× high-resolution sprite support.**
+
+Prince of Persia Remastered is an independent, unofficial fan project maintained
+by [The-Alok](https://github.com/The-Alok). It brings the original Macintosh
+colour artwork, sprite origins and scene composition to a modified version of
 [SDLPoP by Dávid Nagy and contributors](https://github.com/NagyD/SDLPoP).
-Maintained by [The-Alok](https://github.com/The-Alok).
+
+The custom renderer uses a **640×400 physical framebuffer** over SDLPoP's
+**320×200 logical gameplay canvas**. “2×” describes that rendering scale; the
+Macintosh sprites use their original native pixels and SHPD origins.
+The project focuses on this Macintosh presentation, its asset handling and
+platform builds while retaining SDLPoP's gameplay foundation.
 
 ![Welcome screen](doc/images/welcome.png)
 
@@ -90,6 +99,13 @@ python3 tools/mac_native_renderer/test_climb_overlay.py \
 Independent source-image fixtures used by the tests are included; the original
 Macintosh disk image and extracted application resources are not uploaded.
 Earlier development/audit notes remain in the repository.
+
+## Issues and contributions
+
+This repository is the home for this Macintosh port's rendering, graphics-pack,
+scaling, asset-loading and Windows/Linux build work. Report issues with your
+platform, graphics pack, level/room if known, facing direction and a screenshot
+or recording. Gameplay regressions observed in this version are welcome too.
 
 ## Credits and license
 
