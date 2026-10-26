@@ -48,8 +48,9 @@ def main():
 
     for name in ('SDLPoP.ini', 'COPYING', 'CREDITS.md', 'README.md', 'README.upstream.md', 'RELEASE_NOTES.md'):
         add(ROOT/name)
-    for name in ('doc/images/welcome.png', 'doc/RELEASE_VALIDATION.md'):
-        add(ROOT/name)
+    add(ROOT/'doc/RELEASE_VALIDATION.md')
+    for image in (ROOT/'doc/images').glob('*.png'):
+        add(image)
     for folder in ('data', 'mods', 'replays'):
         for path in (ROOT/folder).rglob('*'):
             if path.is_file() and path.suffix.lower() not in ('.sav', '.p1r', '.cfg'):
