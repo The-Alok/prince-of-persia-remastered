@@ -46,7 +46,7 @@ Download the appropriate archive from [Releases](https://github.com/The-Alok/pri
 | Platform | Download | Start |
 | --- | --- | --- |
 | Windows x64 | `prince-of-persia-remastered-v1.0.0-windows-x86_64.zip` | Extract everything, then double-click `prince.exe` |
-| Linux x64 | `prince-of-persia-remastered-v1.0.0-linux-x86_64.tar.gz` | Extract, then run `./launch.sh` |
+| Linux x64 | `prince-of-persia-remastered-v1.0.0-linux-x86_64.tar.gz` | Extract, then run `./launch.sh` or ` ./prince ` |
 
 Windows includes the required SDL runtime DLLs; keep them beside `prince.exe`.
 Linux uses the system SDL2 and SDL2_image libraries. On Debian/Ubuntu:
@@ -67,7 +67,8 @@ build from source. Steam Deck compatibility has not been certified.
 - Original-data sword attachment placement for the Prince and guard families.
 - Native cutscene composition, story-card colours, health flasks and RGB fades.
 - Five switchable graphics packs in this order: **Mac Native FULL v1.0.0**
-  (default), **DOS**, **SNES 1**, **SNES 2**, **SNES 3**.
+  (default), **DOS**, **SNES 1**, **SNES 2**, **SNES 3**. Switch on the fly
+  from setting > visual > graphics packs; No need to restart.
 
 SDLPoP gameplay, collision, animation timing and replay logic are preserved.
 
