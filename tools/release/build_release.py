@@ -46,9 +46,10 @@ def main():
         if path.is_file():
             contents[relative or path.relative_to(ROOT).as_posix()] = path.read_bytes()
 
-    for name in ('SDLPoP.ini', 'COPYING', 'CREDITS.md', 'README.md', 'README.upstream.md', 'RELEASE_NOTES.md'):
+    # Explicit public-document list: ignored local development notes must not
+    # enter downloads merely because they still exist in the working tree.
+    for name in ('SDLPoP.ini', 'COPYING', 'README.md'):
         add(ROOT/name)
-    add(ROOT/'doc/RELEASE_VALIDATION.md')
     for image in (ROOT/'doc/images').glob('*.png'):
         add(image)
     for folder in ('data', 'mods', 'replays'):
@@ -58,7 +59,7 @@ def main():
     metadata = {'version': VERSION, 'platform': f'{args.platform}-x86_64', 'source': SOURCE_URL,
                 'upstream': 'https://github.com/NagyD/SDLPoP',
                 'graphics_reference': 'https://github.com/chanunnaki/SDLPoP-PSP',
-                'live_full_game_and_steam_deck_tests': 'pending; see RELEASE_NOTES.md'}
+                'live_full_game_and_steam_deck_tests': 'pending; see README.md#validation-limits'}
     if args.platform == 'linux':
         if platform.system() != 'Linux' or platform.machine() != 'x86_64':
             raise SystemExit('Linux x64 packaging requires a Linux x64 build host.')

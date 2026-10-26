@@ -69,9 +69,14 @@ build from source. Steam Deck compatibility has not been certified.
   (default), **DOS**, **SNES 1**, **SNES 2**, **SNES 3**.
 
 SDLPoP gameplay, collision, animation timing and replay logic are preserved.
-This project has automated visual/reference coverage; it does not claim that
-all original-Mac motion has been reproduced or that every level has had a
-complete live playthrough. See [RELEASE_NOTES.md](RELEASE_NOTES.md).
+
+## Validation limits
+
+Automated visual/reference and lifecycle checks pass. Windows startup and title
+rendering were checked under Wine; native Windows sound, input and a complete
+playthrough remain pending. Steam Deck testing and broader original-Mac motion
+comparisons also remain open. Build/startup checks are separate from live
+gameplay testing.
 
 ## Quick controls
 
@@ -120,7 +125,6 @@ python3 tools/mac_native_renderer/test_climb_overlay.py \
 
 Independent source-image fixtures used by the tests are included; the original
 Macintosh disk image and extracted application resources are not uploaded.
-Earlier development/audit notes remain in the repository.
 
 ## Issues and contributions
 
@@ -138,14 +142,104 @@ remain credited to their respective creators below.
 
 ## Credits and license
 
-- **Dávid Nagy and all SDLPoP contributors** — engine and gameplay foundation.
-- **chanunnaki / SDLPoP-PSP** — graphics-pack implementation/reference used
-  during development, with the original mod/graphics authors credited separately.
-- **Jordan Mechner and the original Prince of Persia teams** — original game.
+This is a modified version of [SDLPoP](https://github.com/NagyD/SDLPoP) by
+**Dávid Nagy (NagyD)** and contributors. SDLPoP remains the engine and gameplay
+foundation. Thanks to **Falcury** for SDL2, replays, quicksave, menus and other
+features, and to all upstream contributors listed below.
 
-Full attribution is in [CREDITS.md](CREDITS.md), including KJ, Maurice Kaltofen
-(mk1995) and the source graphics contributors. The complete upstream author
-list is preserved in [README.upstream.md](README.upstream.md).
+**[chanunnaki's SDLPoP-PSP](https://github.com/chanunnaki/SDLPoP-PSP)** supplied
+the graphics-pack implementation/reference used during this project's earlier
+work. Thanks to chanunnaki for the enhanced PSP port and pack integration, and
+to **striga** and **sharkwouter** for the earlier PSP scaffolding.
 
-Source is **GPL-3.0-or-later**; see [COPYING](COPYING). Original game artwork
-retains its original ownership. Bundled libraries retain their own licenses.
+Earlier platform ports also credit **PSPDEV, samo79, BeWorld, Capehill and the
+SDL2 AmigaOS4 contributors, salass00, kas1e, guillaume**, and **os4coding.net**.
+
+Graphics-pack integration is separate from authorship of the artwork:
+
+- **Mac Native FULL**: original Macintosh artwork and SHPD origins from the
+  Macintosh game. This project's renderer does not claim authorship of that
+  artwork. Independent source-image fixtures used by the tests retain the
+  native Mac dimensions, transparency and origins recorded in their manifest.
+- **SNES 1 / SNES 2**: based on the former SNES Alt pack, sourced from
+  **Maurice Kaltofen (mk1995)**'s SNES-PC-set. SNES 1 additionally uses this
+  project's Prince recolouring.
+- **SNES 3**: former SNES pack, sourced from **KJ**'s SNES Remnants. The
+  referenced credits also acknowledge **brain, PoP_MoreSNES, Total Pack 3.0,
+  tV2 and programmer**.
+
+See the [PSP project's graphics credits](https://github.com/chanunnaki/SDLPoP-PSP#graphics-packs--custom-level-authors)
+for its full attribution and mod references.
+
+**Jordan Mechner and the original Prince of Persia teams**, including the
+Macintosh artwork/port contributors, created the original game. This is an
+unofficial fan project maintained by [The-Alok](https://github.com/The-Alok).
+
+<details>
+<summary>Original SDLPoP author and contributor list</summary>
+
+Author:
+
+* NagyD (David from `forum.princed.org`)
+
+Contributors:
+
+* Andrew (bug reports)
+* htamas (inspiration, dungeon wall drawing algorithm, bug reports)
+* Norbert (EndeavourAccuracy on GitHub) (bug reports, suggestions, improved gamepad support)
+* musa (bug reports)
+* Eugene (bug reports)
+* StaticReturn (Mac OS X: Makefile (for older SDL1 version), bug reports)
+* Poirot (ecalot on GitHub) (Mac OS X: Now compatible with Falcury SDL2 port)
+* kees (bugfixes)
+* Falcury
+    * porting to SDL2
+    * quicksave improvements
+    * replay files
+    * SDLPoP.ini: added basic support and constantly adding new options
+    * mod folders
+    * fake tiles
+    * readable sequence table
+    * CMake support
+    * pause menu
+    * MIDI support
+    * and various other bugfixes, improvements, additions
+* segra (segrax on GitHub) (Joystick support, resizable window)
+* DarkPrince (bug reports)
+* Andrey Vasilkin / digi@os2.snc.ru (eComStation (OS/2) support)
+* mfn (fixed a small bug when `USE_MIXER` is undefined)
+* diddledani (Visual C++/NMake support)
+* zaps166 (small Makefile fixes)
+* usineur (faster music loading)
+* yaqxsw (icon)
+* SergioMartin86
+* dstarosta
+* Ryzee119
+* berikv
+* xyproto
+* BarrOff
+* icculus
+* thrimbor
+* vanfanel
+* asppsa
+* akien-mga
+* mbeijen
+* alebcay
+* ckorn
+* Rondom
+* yuv422
+* dive
+
+Usernames on the list above refer to either GitHub users or users from `forum.princed.org`.
+
+</details>
+
+Source is **GPL-3.0-or-later**; see [COPYING](COPYING) and the original copyright
+and license notices preserved in the source files. Original game artwork and
+other game data retain their original ownership; this project does not
+relicense them.
+
+[SDL (Simple DirectMedia Layer)](https://www.libsdl.org/) is distributed under
+the [zlib license](https://www.zlib.net/zlib_license.html). SDL_image, Nuked OPL3
+and stb_vorbis retain their own notices and licenses. Windows downloads include
+notices for their bundled runtime libraries.
