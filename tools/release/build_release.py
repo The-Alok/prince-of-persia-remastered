@@ -14,7 +14,6 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 VERSION = re.search(r'^#define REMASTERED_VERSION "([^"]+)"', (ROOT/'src/config.h').read_text(), re.M)[1]
-SOURCE_URL = f'https://github.com/The-Alok/prince-of-persia-remastered/tree/v{VERSION}'
 
 
 def digest(data):
@@ -30,9 +29,15 @@ def main():
     parser.add_argument('--platform', choices=['linux', 'windows'], default='linux')
     parser.add_argument('--windows-runtime', type=Path, default=ROOT/'.build/windows/runtime')
     parser.add_argument('--output', type=Path, default=ROOT/'dist')
+    parser.add_argument('--source-ref', help='exact source commit/tag; defaults to HEAD in a Git checkout')
     args = parser.parse_args()
     if not re.fullmatch(r'\d+\.\d+\.\d+', VERSION):
         raise SystemExit('Expected a public semantic release version.')
+    source_ref = args.source_ref
+    if not source_ref:
+        if not (ROOT/'.git').exists():
+            raise SystemExit('Pass --source-ref with the matching source commit/tag when packaging a source export.')
+        source_ref = command('git', 'rev-parse', 'HEAD').strip()
     if 'graphics_pack = mac_native_full' not in (ROOT/'SDLPoP.ini').read_text():
         raise SystemExit('Native FULL must be the startup default.')
     contents = {}
@@ -69,7 +74,8 @@ def main():
         add(path)
     for name in ('mods/mods.txt', 'replays/replays.txt'):
         add(ROOT/name)
-    metadata = {'version': VERSION, 'platform': f'{args.platform}-x86_64', 'source': SOURCE_URL,
+    metadata = {'version': VERSION, 'platform': f'{args.platform}-x86_64',
+                'source': f'https://github.com/The-Alok/prince-of-persia-remastered/tree/{source_ref}',
                 'upstream': 'https://github.com/NagyD/SDLPoP',
                 'graphics_reference': 'https://github.com/chanunnaki/SDLPoP-PSP',
                 'macintosh_graphics': 'not bundled; generate locally from your own Macintosh colour-game disk',
