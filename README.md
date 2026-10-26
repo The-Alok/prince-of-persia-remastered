@@ -82,25 +82,23 @@ and SNES packs. The first successful import starts in Macintosh mode; later
 launches remember your in-game graphics choice. The screenshots above illustrate
 the optional Macintosh pack alongside the other graphics options.
 
-**Historical release notice:** the previously published v1.0.0 downloads and
-older Git history still contain Macintosh assets until their separate cleanup
-is reviewed and completed. The new launcher is available from the current source and local v1.0.1 builds;
-the historical v1.0.0 downloads do not yet include it. Their cleanup and a new
-public release remain separate steps.
+**Historical release notice:** the older v1.0.0 downloads and Git history
+contain Macintosh assets. Cleanup of those older copies remains a separate
+review; v1.0.1 generates its optional Macintosh pack locally from your own copy.
 
+## Download v1.0.1
 
-## Next release: v1.0.1
-
-The v1.0.1 builds below are the next release targets. They include automatic
-Macintosh setup, HQX/SIT/ISO import, direct startup after setup, the F7/F8 display
-controls, and corrected background-brick layering while falling.
-They are not yet published on [Releases](https://github.com/The-Alok/prince-of-persia-remastered/releases);
-the historical v1.0.0 downloads remain separate until release cleanup is approved.
+[Release notes and downloads](https://github.com/The-Alok/prince-of-persia-remastered/releases/tag/v1.0.1)
+include automatic Macintosh setup, HQX/SIT/ISO import, direct startup after
+setup, F7/F8 display controls and corrected brick layering while falling.
 
 | Platform | Download | Start |
 | --- | --- | --- |
-| Windows x64 | `prince-of-persia-remastered-v1.0.1-windows-x86_64.zip` | Extract everything, then double-click `prince.exe` |
-| Linux x64 | `prince-of-persia-remastered-v1.0.1-linux-x86_64.tar.gz` | Extract, then run `./launch.sh` or `./prince` |
+| Windows x64 | [Windows ZIP](https://github.com/The-Alok/prince-of-persia-remastered/releases/download/v1.0.1/prince-of-persia-remastered-v1.0.1-windows-x86_64.zip) | Extract everything, then double-click `prince.exe` |
+| Linux x64 | [Linux tar.gz](https://github.com/The-Alok/prince-of-persia-remastered/releases/download/v1.0.1/prince-of-persia-remastered-v1.0.1-linux-x86_64.tar.gz) | Extract, then run `./launch.sh` or `./prince` |
+
+[SHA-256 checksums](https://github.com/The-Alok/prince-of-persia-remastered/releases/download/v1.0.1/SHA256SUMS-v1.0.1.txt)
+are provided for both downloads.
 
 Windows includes the required SDL runtime DLLs; keep them beside `prince.exe`.
 Linux uses the system SDL2 and SDL2_image libraries. On Debian/Ubuntu:
