@@ -18,8 +18,13 @@ This is no longer a simple graphics pack. `mac_native_full` is a Macintosh-aware
 
 ## Current baseline: v1.0.0 — Windows/Linux public release preparation
 
-Release source is prepared as a real fork of NagyD/SDLPoP under
-The-Alok/prince-of-persia-remastered, preserving upstream history. The public
+The GitHub project is now a standalone repository under
+The-Alok/prince-of-persia-remastered. At the user's request, it left the
+NagyD/SDLPoP fork network on 2026-10-26. Git commit history, SDLPoP attribution,
+original license/copyright headers, the existing star, and v1.0.0 release/assets
+were preserved. GitHub reports fork=false and no parent. The README/description
+now lead with the Macintosh HD port, native 640x400 renderer and 2x sprite
+support; see CREDITS.md for the engine and graphics-reference authors. The public
 version is 1.0.0; Windows and Linux package builders and complete attribution
 are in tools/release/, CREDITS.md and README.upstream.md. Runtime downloads
 contain data/libraries/notices; exact source is published at the matching tag.
