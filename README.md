@@ -8,6 +8,31 @@ by [The-Alok](https://github.com/The-Alok). It brings the original Macintosh
 colour artwork, sprite origins and scene composition to a modified version of
 [SDLPoP by Dávid Nagy and contributors](https://github.com/NagyD/SDLPoP).
 
+## Gameplay screenshots
+
+### Mac Native FULL
+
+**Dungeon — Level 1**
+
+![Mac Native FULL gameplay in the Level 1 dungeon](doc/images/gameplay-level1-mac.png)
+
+**Palace — Level 5**
+
+![Mac Native FULL gameplay in the palace](doc/images/gameplay-mac.png)
+
+### Other graphics packs
+
+Each grid shows **DOS, SNES 1, SNES 2 and SNES 3**, in that order.
+
+**Dungeon — Level 1**
+
+![DOS and all three SNES packs in the same Level 1 dungeon scene](doc/images/graphics-packs-level1.png)
+
+**Palace — Level 5**
+
+![DOS and all three SNES packs in the same palace scene](doc/images/graphics-packs.png)
+
+
 The custom renderer uses a **640×400 physical framebuffer** over SDLPoP's
 **320×200 logical gameplay canvas**. “2×” describes that rendering scale; the
 Macintosh sprites use their original native pixels and SHPD origins.
@@ -58,29 +83,6 @@ is reviewed and completed. The new launcher is available from the current source
 the historical v1.0.0 downloads do not yet include it. Their cleanup and a new
 public release remain separate steps.
 
-## Gameplay screenshots
-
-### Mac Native FULL
-
-**Dungeon — Level 1**
-
-![Mac Native FULL gameplay in the Level 1 dungeon](doc/images/gameplay-level1-mac.png)
-
-**Palace — Level 5**
-
-![Mac Native FULL gameplay in the palace](doc/images/gameplay-mac.png)
-
-### Other graphics packs
-
-Each grid shows **DOS, SNES 1, SNES 2 and SNES 3**, in that order.
-
-**Dungeon — Level 1**
-
-![DOS and all three SNES packs in the same Level 1 dungeon scene](doc/images/graphics-packs-level1.png)
-
-**Palace — Level 5**
-
-![DOS and all three SNES packs in the same palace scene](doc/images/graphics-packs.png)
 
 
 ## Download and play
