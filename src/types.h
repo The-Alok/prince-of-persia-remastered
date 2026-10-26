@@ -98,7 +98,18 @@ typedef struct back_table_type {
 	byte chtab_id;
 	byte id;
 	int blit;
+	/* v6: exact Macintosh compositor coordinates. These are physical
+	 * 640x400 pixels, used only when use_physical is non-zero. */
+	short physical_x;
+	short physical_y;
+	short physical_clip_bottom; // -1: no extra clip; otherwise exclusive native Y.
+	short physical_clip_top; // -1: no extra clip.
+	byte use_physical;
+	short physical_w, physical_h;
+	Uint32 fill_rgb;
 } back_table_type;
+
+enum { native_entry_fill = 2, FORETABLE_MAX = 600 };
 
 typedef struct midtable_type {
 	sbyte xh;
@@ -109,6 +120,11 @@ typedef struct midtable_type {
 	byte peel;
 	rect_type clip;
 	int blit;
+	short physical_x;
+	short physical_y;
+	byte use_physical;
+	short physical_w, physical_h;
+	Uint32 fill_rgb;
 } midtable_type;
 
 typedef struct wipetable_type {
@@ -465,6 +481,10 @@ typedef struct palette_fade_type {
 	word which_rows;
 	word wait_time;
 	word fade_pos;
+	/* Native RGB fades borrow the live cutscene/fade-in source. Static
+	 * fade-out owns a full-screen snapshot, including the HUD strip. */
+	surface_type* native_source;
+	surface_type* native_snapshot;
 	rgb_type original_pal[256];
 	rgb_type faded_pal[256];
 	int (*proc_fade_frame)(struct palette_fade_type* palette_buffer);

@@ -1,0 +1,175 @@
+{
+  "source_disk": "PoP1_spf.dsk",
+  "sha256": "455cb7bd1bc37bfd21c24fd91b34d2c0aee488d9b066d48fd7e6a49ddd3ee504",
+  "files": [
+    {
+      "id": 17,
+      "type": "FNDR",
+      "creator": "ERIK",
+      "components": [
+        "Desktop"
+      ],
+      "data": {
+        "file": "hfs-forks/Desktop.data",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "rsrc": {
+        "file": "hfs-forks/Desktop.rsrc",
+        "size": 34056,
+        "sha256": "85665bffb669dc298db6d93f7844f9b24288c8aed50294c4b4187f76d08da880"
+      }
+    },
+    {
+      "id": 40,
+      "type": "icon",
+      "creator": "MACS",
+      "components": [
+        "Icon\r"
+      ],
+      "data": {
+        "file": "hfs-forks/Icon_.data",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "rsrc": {
+        "file": "hfs-forks/Icon_.rsrc",
+        "size": 2606,
+        "sha256": "33183c8d836d2add0a19049f57fefdfcdc83c4c4c5fce7dec9c6aab3b1bbfe01"
+      }
+    },
+    {
+      "id": 19,
+      "type": "dtpl",
+      "creator": "dcdc",
+      "components": [
+        "TheVolumeSettingsFolder",
+        "DesktopPrinters DB"
+      ],
+      "data": {
+        "file": "hfs-forks/TheVolumeSettingsFolder__DesktopPrinters DB.data",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "rsrc": {
+        "file": "hfs-forks/TheVolumeSettingsFolder__DesktopPrinters DB.rsrc",
+        "size": 286,
+        "sha256": "40dc81615e0c31b2e4fe653a3c1a41e50530dcf64a4b2428ff8ae6b5770863b6"
+      }
+    },
+    {
+      "id": 28,
+      "type": "FOLD",
+      "creator": "MACS",
+      "components": [
+        "TheVolumeSettingsFolder",
+        "OpenFolderListDF\r"
+      ],
+      "data": {
+        "file": "hfs-forks/TheVolumeSettingsFolder__OpenFolderListDF_.data",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "rsrc": {
+        "file": "hfs-forks/TheVolumeSettingsFolder__OpenFolderListDF_.rsrc",
+        "size": 286,
+        "sha256": "4f585fc0c794305db1cde6c9b7e2c5f1d362f7e5e29871881a18cd20e7d0b86d"
+      }
+    },
+    {
+      "id": 35,
+      "type": "PPgf",
+      "creator": "Po\u0192P",
+      "components": [
+        "Prince of Persia",
+        "Persia(BW)"
+      ],
+      "data": {
+        "file": "hfs-forks/Prince of Persia__Persia(BW).data",
+        "size": 294251,
+        "sha256": "2aa4aa963d644652ada55830177772d583e441c0981d8775e6cc816c8e25440f"
+      },
+      "rsrc": {
+        "file": "hfs-forks/Prince of Persia__Persia(BW).rsrc",
+        "size": 5154,
+        "sha256": "03366c0f9e959e19ee544ddab1d8c76f2fe0c47f42d0f63a6119ba0ed02bf390"
+      }
+    },
+    {
+      "id": 36,
+      "type": "PPgf",
+      "creator": "Po\u0192P",
+      "components": [
+        "Prince of Persia",
+        "Persia(COLOR)"
+      ],
+      "data": {
+        "file": "hfs-forks/Prince of Persia__Persia(COLOR).data",
+        "size": 470375,
+        "sha256": "2a9ac3731a9d73ca289e63ca479c2e82eebd275263761cd1644d4184e4ee58ce"
+      },
+      "rsrc": {
+        "file": "hfs-forks/Prince of Persia__Persia(COLOR).rsrc",
+        "size": 5154,
+        "sha256": "26ec5760c062aeef6f26ad6feb0d3341ef79183ec8e2fb0b79d5cd65708d93bc"
+      }
+    },
+    {
+      "id": 37,
+      "type": "PPgf",
+      "creator": "Po\u0192P",
+      "components": [
+        "Prince of Persia",
+        "Persia(LC)"
+      ],
+      "data": {
+        "file": "hfs-forks/Prince of Persia__Persia(LC).data",
+        "size": 384160,
+        "sha256": "91ef8cd585b9bf3805610c7de4cebf1d1ec6349178de65061bf8327c33876e49"
+      },
+      "rsrc": {
+        "file": "hfs-forks/Prince of Persia__Persia(LC).rsrc",
+        "size": 5154,
+        "sha256": "dedfe322b1df03fcc66714f9f2fcedcedef2fa3813fa9568730138260e6b61e0"
+      }
+    },
+    {
+      "id": 38,
+      "type": "APPL",
+      "creator": "Po\u0192P",
+      "components": [
+        "Prince of Persia",
+        "Prince of Persia"
+      ],
+      "data": {
+        "file": "hfs-forks/Prince of Persia__Prince of Persia.data",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "rsrc": {
+        "file": "hfs-forks/Prince of Persia__Prince of Persia.rsrc",
+        "size": 491230,
+        "sha256": "37d0a3e7ec03f403ea6ab17ee3fa778c6ec3583019191266f20841699e0df8e6"
+      }
+    },
+    {
+      "id": 39,
+      "type": "TEXT",
+      "creator": "ttxt",
+      "components": [
+        "Prince of Persia",
+        "Read Me"
+      ],
+      "data": {
+        "file": "hfs-forks/Prince of Persia__Read Me.data",
+        "size": 2726,
+        "sha256": "7ffa59428c80a0d79c34a3281cada3f1b5a90b5817a0b9bbd83bc57c5752b041"
+      },
+      "rsrc": {
+        "file": "hfs-forks/Prince of Persia__Read Me.rsrc",
+        "size": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    }
+  ]
+}

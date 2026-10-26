@@ -39,7 +39,7 @@ void init_lighting() {
 		return;
 	}
 
-	screen_overlay = SDL_CreateRGBSurface(0, 320, 192, 32, Rmsk, Gmsk, Bmsk, Amsk);
+	screen_overlay = SDL_CreateRGBSurface(0, 320 * get_render_scale(), 192 * get_render_scale(), 32, Rmsk, Gmsk, Bmsk, Amsk);
 	if (screen_overlay == NULL) {
 		sdlperror("SDL_CreateRGBSurface (screen_overlay)");
 		enable_lighting = 0;
@@ -84,12 +84,12 @@ void redraw_lighting() {
 
 			// Align the center of lighting mask to the center of the flame.
 			SDL_Rect dest_rect;
-			dest_rect.x = x - lighting_mask->w / 2;
-			dest_rect.y = y - lighting_mask->h / 2;
-			dest_rect.w = lighting_mask->w;
-			dest_rect.h = lighting_mask->h;
+			dest_rect.x = x * get_render_scale() - (lighting_mask->w * get_render_scale()) / 2;
+			dest_rect.y = y * get_render_scale() - (lighting_mask->h * get_render_scale()) / 2;
+			dest_rect.w = lighting_mask->w * get_render_scale();
+			dest_rect.h = lighting_mask->h * get_render_scale();
 
-			int result = SDL_BlitSurface(lighting_mask, NULL, screen_overlay, &dest_rect);
+			int result = SDL_BlitScaled(lighting_mask, NULL, screen_overlay, &dest_rect);
 			if (result != 0) {
 				sdlperror("SDL_BlitSurface (lighting_mask)");
 			}

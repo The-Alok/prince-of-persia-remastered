@@ -3,8 +3,8 @@
 CC = gcc
 RM = rm -f
 
-HFILES = common.h config.h data.h proto.h types.h
-OBJ = main.o data.o seg000.o seg001.o seg002.o seg003.o seg004.o seg005.o seg006.o seg007.o seg008.o seg009.o seqtbl.o replay.o options.o lighting.o screenshot.o menu.o midi.o opl3.o stb_vorbis.o
+HFILES = common.h config.h data.h proto.h types.h pak.h
+OBJ = main.o data.o seg000.o seg001.o seg002.o seg003.o seg004.o seg005.o seg006.o seg007.o seg008.o seg009.o pak.o seqtbl.o replay.o options.o lighting.o screenshot.o menu.o midi.o opl3.o stb_vorbis.o
 BIN = ../prince
 
 OS      := $(shell uname)
@@ -20,6 +20,9 @@ CPPFLAGS += -D_THREAD_SAFE -DOSX
 endif
 
 all: $(BIN)
+
+seg008.o: mac_palace_palette.h
+seg006.o: mac_sword_table.h
 
 clean:
 	$(RM) $(OBJ) $(BIN)

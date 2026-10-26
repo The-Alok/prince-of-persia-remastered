@@ -238,6 +238,10 @@ void draw_level_first() {
 
 // seg003:037B
 void redraw_screen(int drawing_different_room) {
+	/* Architecture recomposition is a visual refresh, not a room entry.
+	 * Re-arming exit_room_timer here on every gate step prevents room exits. */
+	const int native_refresh = !drawing_different_room &&
+	                          uses_mac_native_full();
 	//remove_flash();
 	if (drawing_different_room) {
 		draw_rect(&rect_top, color_0_black);
@@ -261,12 +265,25 @@ void redraw_screen(int drawing_different_room) {
 #ifdef USE_LIGHTING
 	redraw_lighting();
 #endif
-		if (is_keyboard_mode) {
+		if (is_keyboard_mode && !native_refresh) {
 			clear_kbd_buf();
+		}
+		/* Native Mac environment pieces contain real transparency. The DOS
+		 * compositor historically relied on opaque room tiles, so stale pixels
+		 * in offscreen_surface were harmless. With transparent 640x400 art they
+		 * leaked through as architecture from the previously drawn room/level.
+		 * Clear the offscreen room once, immediately before the first table pass.
+		 * Do NOT clear before the second pass because draw_moving() lives between
+		 * them and must remain in the composed frame. */
+		if (strcasecmp(graphics_pack_name, "mac_native") == 0 ||
+		    uses_mac_native_full()) {
+			current_target_surface = offscreen_surface;
+			draw_rect(&rect_top, color_0_black);
+			current_target_surface = onscreen_surface_;
 		}
 		is_blind_mode = 1;
 		draw_tables();
-		if (is_keyboard_mode) {
+		if (is_keyboard_mode && !native_refresh) {
 			clear_kbd_buf();
 		}
 #ifdef USE_COPYPROT
@@ -286,7 +303,7 @@ void redraw_screen(int drawing_different_room) {
 		memset(table_counts, 0, sizeof(table_counts));
 		draw_moving();
 		draw_tables();
-		if (is_keyboard_mode) {
+		if (is_keyboard_mode && !native_refresh) {
 			clear_kbd_buf();
 		}
 		need_drects = 1;
@@ -300,11 +317,11 @@ void redraw_screen(int drawing_different_room) {
 		if (upside_down) {
 			flip_screen(offscreen_surface);
 		}
-		if (is_keyboard_mode) {
+		if (is_keyboard_mode && !native_refresh) {
 			clear_kbd_buf();
 		}
 	}
-	exit_room_timer = 2;
+	if (!native_refresh) exit_room_timer = 2;
 
 }
 
@@ -584,6 +601,15 @@ void check_mirror() {
 				if (clip_top < obj_y) {
 					obj_clip_top = clip_top;
 					obj_clip_left = (Char.curr_col << 5) + 9;
+					/* Native room recomposition can leave the previous object in
+					 * another cell. Register this reflection with its mirror cell
+					 * so floor/frame ordering does not depend on the previous draw. */
+					if (uses_mac_native_full()) {
+						obj_tilepos = get_tilepos_nominus(Char.curr_col, Char.curr_row);
+						/* The glass diagonals/frame must follow the reflection on
+						 * every draw, even when Kid's body is in the next cell. */
+						set_redraw_fore(obj_tilepos, 1);
+					}
 					add_objtable(4); // mirror image
 				}
 			}

@@ -19,6 +19,7 @@ The authors of this program may be contacted at https://forum.princed.org
 */
 
 #include "common.h"
+#include "mac_palace_palette.h"
 
 // data:27E0
 add_table_type ptr_add_table = add_backtable;
@@ -71,6 +72,790 @@ short drawn_col;
 byte tile_left;
 // data:4CCC
 byte modifier_left;
+
+
+// -----------------------------------------------------------------------------
+// Macintosh COLOR 640x400 compositor (v6 foundation; v11 floor states)
+//
+// The original Mac renderer places SHPD images at a logical anchor, then
+// subtracts each image's SHPD origin in *native* pixels:
+//   px = anchor_x * 2 - origin_x
+//   py = anchor_y * 2 - origin_y
+// The old SDLPoP path instead treated graphics as DOS top-left/bottom-aligned
+// rectangles.  The two models are close enough to look plausible, but odd
+// origins and tall palace pieces drift or overlap incorrectly.  The helpers
+// below preserve SDLPoP gameplay/tile state while using the exact Mac formula.
+
+#define MAC_CELL_TOP_ANCHOR    (-63)
+#define MAC_FLOOR_TOP_ANCHOR   (-4)
+#define MAC_FLOOR_BOTTOM_ANCHOR (-1)
+
+/* v11.9: native climb redraws need the same midtable floor occlusion
+ * semantics as the original renderer. */
+static void mac_draw_floor_overlay_exact(void);
+static void mac_draw_other_overlay_exact(void);
+int mac_add_mid_anchor_exact(short chtab_id, int id,
+		int anchor_x, int anchor_y, int blit, byte peel);
+/* The generic airborne overlay reuses native components, on the MID layer. */
+static int mac_back_to_mid = 0;
+/* v11.13: Dynamic foreground redraws stay a separate compositor phase from
+ * full-tile redraws, but native dungeon pillar foreground must remain enabled
+ * during climb-up. The pillar face is the foreground occluder that hides the
+ * Prince's lower body behind the ledge, matching the original Macintosh draw
+ * order. Earlier v11.10-v11.12 suppression made his leg/foot show through it. */
+
+/* v7: Moving actors still use the original gameplay/object coordinate system,
+ * but native Macintosh actor and combat-sword images carry SHPD origins just
+ * like the room art.  These chtabs are character/sword layers whose logical
+ * anchor must remain untouched while the native image is positioned around it. */
+static int mac_native_actor_chtab(short chtab_id) {
+	if (!uses_mac_native_full()) return 0;
+	return chtab_id == id_chtab_0_sword ||
+	       chtab_id == id_chtab_2_kid ||
+	       chtab_id == id_chtab_3_princessinstory ||
+	       chtab_id == id_chtab_4_jaffarinstory_princessincutscenes ||
+	       chtab_id == id_chtab_5_guard;
+}
+
+static int mac_add_back_or_fore_exact(int fore, short chtab_id, int id,
+		int anchor_x, int anchor_y, int blit, int clip_bottom, int clip_top, int physical_dy) {
+	if (id == 0) return 0;
+	if (!fore && mac_back_to_mid) {
+		return mac_add_mid_anchor_exact(chtab_id, id, anchor_x, anchor_y, blit, 0);
+	}
+	back_table_type* table = fore ? foretable : backtable;
+	short* count_ptr = fore ? &foretable_count : &backtable_count;
+	word index = *count_ptr;
+	if (index >= (fore ? FORETABLE_MAX : 200)) {
+		show_dialog(fore ? "ForeTable Overflow" : "BackTable Overflow");
+		return 0;
+	}
+	image_type* image = get_image(chtab_id, id - 1);
+	if (image == NULL) return 0;
+	short ox = 0, oy = 0;
+	bool has_origin = get_native_image_origin(image, &ox, &oy);
+
+	back_table_type* item = &table[index];
+	item->xh = (sbyte)(anchor_x / 8);
+	item->xl = (sbyte)(anchor_x % 8);
+	item->y = (short)(anchor_y - logical_image_height(image) + 1);
+	item->chtab_id = (byte)chtab_id;
+	item->id = (byte)(id - 1);
+	item->blit = blit;
+	item->physical_x = (short)(anchor_x * 2 - (has_origin ? ox : 0));
+	item->physical_y = (short)(anchor_y * 2 - (has_origin ? oy : image->h) + physical_dy);
+	item->physical_clip_bottom = clip_bottom;
+	item->physical_clip_top = clip_top;
+	item->use_physical = 1;
+	if (draw_mode) draw_back_fore(fore ? 1 : 0, index);
+	(*count_ptr)++;
+	return 1;
+}
+
+static int mac_add_back_exact(short chtab_id, int id, int dx, int dy, int blit) {
+	return mac_add_back_or_fore_exact(0, chtab_id, id,
+		draw_xh * 8 + dx, draw_main_y + 1 + dy, blit, -1, -1, 0);
+}
+
+static int mac_add_fore_exact(short chtab_id, int id, int dx, int dy, int blit) {
+	return mac_add_back_or_fore_exact(1, chtab_id, id,
+		draw_xh * 8 + dx, draw_main_y + 1 + dy, blit, -1, -1, 0);
+}
+
+int mac_add_fore_anchor_exact(short chtab_id, int id, int anchor_x, int anchor_y, int blit) {
+	return mac_add_back_or_fore_exact(1, chtab_id, id, anchor_x, anchor_y, blit, -1, -1, 0);
+}
+
+/* Original Mac CODE 2:$223E. Render-only state never touches random_seed. */
+static word mac_palace_random(dword* seed, word maximum) {
+	word upper = *seed >> 16;
+	word old_low = (word)*seed;
+	word low = (word)(*seed ^ 0x569A) + upper;
+	*seed = (dword)low * 0x6A59;
+	return (dword)(word)((word)*seed + old_low) * (maximum + 1) >> 16;
+}
+
+/* Original Mac CODE 3:$0B72: 3 rows, 4 courses, 11 colors/course,
+ * palette 76..79 on even courses and 80..83 on odd, no repeated neighbors. */
+static byte mac_palace_color(int row, int course, int column) {
+	static byte colors[25][132], ready[25];
+	int room = drawn_room <= 24 ? drawn_room : 0;
+	if (!ready[room]) {
+		dword seed = room;
+		mac_palace_random(&seed, 1);
+		for (int r = 0; r < 3; ++r) for (int c = 0; c < 4; ++c) {
+			int previous = -1;
+			for (int col = 0; col < 11; ++col) {
+				int color;
+				do { color = ((c & 1) ? 4 : 0) + mac_palace_random(&seed, 3); } while (color == previous);
+				colors[room][r * 44 + c * 11 + col] = color;
+				previous = color;
+			}
+		}
+		ready[room] = 1;
+	}
+	return colors[room][row * 44 + course * 11 + column];
+}
+
+static void mac_add_wall_fill(int fore, int dx, int bottom, int width, int height, byte color) {
+	int x = (draw_xh * 8 + dx) * 2;
+	int y = (bottom + 1 - height) * 2;
+	if (!fore && mac_back_to_mid) {
+		if (midtable_count >= 50) { show_dialog("MidTable Overflow"); return; }
+		midtable_type* item = &midtable[midtable_count];
+		memset(item, 0, sizeof(*item));
+		item->use_physical = native_entry_fill;
+		item->physical_x = x; item->physical_y = y;
+		item->physical_w = width * 2; item->physical_h = height * 2;
+		item->fill_rgb = mac_palace_rgb[color];
+		if (draw_mode) draw_mid(midtable_count);
+		++midtable_count;
+	} else {
+		short* count = fore ? &foretable_count : &backtable_count;
+		if (*count >= (fore ? FORETABLE_MAX : 200)) { show_dialog("Wall fill table overflow"); return; }
+		back_table_type* item = &(fore ? foretable : backtable)[*count];
+		memset(item, 0, sizeof(*item));
+		item->use_physical = native_entry_fill;
+		item->physical_x = x; item->physical_y = y;
+		item->physical_w = width * 2; item->physical_h = height * 2;
+		item->fill_rgb = mac_palace_rgb[color];
+		if (draw_mode) draw_back_fore(fore, *count);
+		++*count;
+	}
+}
+
+static void mac_draw_palace_wall(int fore) {
+	int row = drawn_row, col = drawn_col;
+	if (row < 0 || row > 2 || col < 0 || col > 9) return;
+	/* Native floor registration is three logical pixels above the DOS
+	 * baselines. The recovered Mac rectangle dimensions remain unchanged. */
+	int main_y = draw_main_y - 3, bottom_y = draw_bottom_y - 3;
+	if (fore) {
+		mac_add_wall_fill(1, 0, main_y - 40, 32, 20, mac_palace_color(row, 0, col));
+		mac_add_wall_fill(1, 0, main_y - 19, 16, 21, mac_palace_color(row, 1, col));
+		mac_add_wall_fill(1, 16, main_y - 19, 16, 21, mac_palace_color(row, 1, col + 1));
+		mac_add_wall_fill(1, 0, main_y, 8, 19, mac_palace_color(row, 2, col));
+		mac_add_wall_fill(1, 8, main_y, 24, 19, mac_palace_color(row, 2, col + 1));
+	}
+	mac_add_wall_fill(fore, 0, bottom_y, 32, 3, mac_palace_color(row, 3, col));
+	dword seed = drawn_room + row * 10 + col;
+	int bottom_id = 15 + mac_palace_random(&seed, 2);
+	if (fore) {
+		mac_add_fore_exact(id_chtab_7_environmentwall, bottom_id, 0, MAC_FLOOR_BOTTOM_ANCHOR, blitters_10h_transp);
+		const int ids[] = {3, 6, 9, 12};
+		const int ys[] = {-53, -34, -13, 0};
+		for (int i = 0; i < 4; ++i)
+			mac_add_fore_exact(id_chtab_7_environmentwall, ids[i] + mac_palace_random(&seed, 2),
+			                   i ? 0 : 24, MAC_FLOOR_TOP_ANCHOR + ys[i], blitters_10h_transp);
+	} else {
+		mac_add_back_exact(id_chtab_7_environmentwall, bottom_id, 0, MAC_FLOOR_BOTTOM_ANCHOR, blitters_10h_transp);
+	}
+}
+
+/* v11: Interactive floors are composed from Macintosh-native components with
+ * explicit logical anchors.  Keeping the IDs and anchors together avoids
+ * accidentally reusing a DOS-only Y correction for one state of the same
+ * floor family.  IDs are the 1-based chtab IDs used by add_*table(). */
+typedef struct mac_floor_state_type {
+	byte base_id;
+	sbyte base_anchor_y;
+	byte right_id;
+	sbyte right_anchor_y;
+	byte front_id;
+	sbyte front_anchor_y;
+} mac_floor_state_type;
+
+static int mac_get_floor_state(byte tile, byte modifier, mac_floor_state_type* out) {
+	static const byte loose_base[11]  = {0x29,0x45,0x29,0x46,0x46,0x29,0x29,0x29,0x46,0x46,0x46};
+	static const byte loose_right[11] = {0x2A,0x47,0x2A,0x48,0x48,0x2A,0x2A,0x2A,0x48,0x48,0x48};
+	static const byte loose_front[11] = {0x2B,0x49,0x2B,0x4A,0x4A,0x2B,0x2B,0x2B,0x4A,0x4A,0x4A};
+
+	if (out == NULL) return 0;
+	memset(out, 0, sizeof(*out));
+	switch (tile) {
+		case tiles_1_floor:
+			*out = (mac_floor_state_type){0x29, MAC_FLOOR_TOP_ANCHOR, 0x2A, MAC_FLOOR_TOP_ANCHOR + 2, 0x2B, MAC_FLOOR_BOTTOM_ANCHOR};
+			return 1;
+		case tiles_2_spike:
+			*out = (mac_floor_state_type){0x7F, MAC_FLOOR_TOP_ANCHOR, 0x85, MAC_FLOOR_TOP_ANCHOR + 2, 0x2B, MAC_FLOOR_BOTTOM_ANCHOR};
+			return 1;
+		case tiles_5_stuck:
+			*out = (mac_floor_state_type){0x29, MAC_FLOOR_TOP_ANCHOR + 1, 0x23, MAC_FLOOR_TOP_ANCHOR + 3, 0x24, MAC_FLOOR_BOTTOM_ANCHOR};
+			return 1;
+		case tiles_6_closer:
+			*out = (mac_floor_state_type){0x29, MAC_FLOOR_TOP_ANCHOR, 0x2A, MAC_FLOOR_TOP_ANCHOR + 2, 0x60, MAC_FLOOR_BOTTOM_ANCHOR};
+			return 1;
+		case tiles_11_loose: {
+			byte frame = MIN(get_loose_frame(modifier), 10);
+			*out = (mac_floor_state_type){loose_base[frame], MAC_FLOOR_TOP_ANCHOR,
+				loose_right[frame], MAC_FLOOR_BOTTOM_ANCHOR - 1,
+				loose_front[frame], MAC_FLOOR_BOTTOM_ANCHOR};
+			return 1;
+		}
+		case tiles_14_debris:
+		case tiles_30_torch_with_debris:
+			*out = (mac_floor_state_type){0x61, MAC_FLOOR_TOP_ANCHOR, 0x62, MAC_FLOOR_TOP_ANCHOR + 2, 0x2B, MAC_FLOOR_BOTTOM_ANCHOR};
+			return 1;
+		case tiles_15_opener:
+			*out = (mac_floor_state_type){0x93, MAC_FLOOR_TOP_ANCHOR, 0x2A, MAC_FLOOR_TOP_ANCHOR + 1, 0x95, MAC_FLOOR_BOTTOM_ANCHOR};
+			return 1;
+		default:
+			return 0;
+	}
+}
+
+static int mac_floor_debug_enabled(void) {
+	return getenv("SDLPOP_MAC_FLOOR_DEBUG") != NULL;
+}
+
+static void mac_debug_floor_piece(const char* role, byte tile, byte modifier,
+		int id, int anchor_x, int anchor_y, image_type* image) {
+	if (!mac_floor_debug_enabled() || id == 0 || image == NULL) return;
+	short ox = 0, oy = 0;
+	bool has_origin = get_native_image_origin(image, &ox, &oy);
+	printf("MAC_FLOOR tile=%u mod=%u role=%s image=%d res=%d anchor_x=%d anchor_y=%d "
+	       "origin_x=%d origin_y=%d physical_x=%d physical_y=%d native=%d\n",
+	       tile, modifier, role, id, 200 + id, anchor_x, anchor_y,
+	       has_origin ? ox : 0, has_origin ? oy : image->h,
+	       anchor_x * 2 - (has_origin ? ox : 0),
+	       anchor_y * 2 - (has_origin ? oy : image->h),
+	       is_native_resolution_image(image) ? 1 : 0);
+}
+
+static int mac_add_floor_back_exact(const char* role, byte tile, byte modifier,
+		int id, int dx, int anchor_y, int blit) {
+	if (id == 0) return 0;
+	image_type* image = get_image(id_chtab_6_environment, id - 1);
+	int anchor_x = draw_xh * 8 + dx;
+	int absolute_anchor_y = draw_main_y + 1 + anchor_y;
+	mac_debug_floor_piece(role, tile, modifier, id, anchor_x, absolute_anchor_y, image);
+	return mac_add_back_or_fore_exact(0, id_chtab_6_environment, id,
+		anchor_x, absolute_anchor_y, blit, -1, -1, 0);
+}
+
+static int mac_add_floor_fore_exact(const char* role, byte tile, byte modifier,
+		int id, int dx, int anchor_y, int blit) {
+	if (id == 0) return 0;
+	image_type* image = get_image(id_chtab_6_environment, id - 1);
+	int anchor_x = draw_xh * 8 + dx;
+	int absolute_anchor_y = draw_main_y + 1 + anchor_y;
+	mac_debug_floor_piece(role, tile, modifier, id, anchor_x, absolute_anchor_y, image);
+	return mac_add_back_or_fore_exact(1, id_chtab_6_environment, id,
+		anchor_x, absolute_anchor_y, blit, -1, -1, 0);
+}
+
+/* Native moving-floor pieces live in the midtable, but their Y values are
+ * Macintosh logical anchors, not DOS bottom-alignment coordinates.  v11 gives
+ * midtable entries the same origin-aware placement used by the static room
+ * compositor so a loose tile does not jump when it becomes a falling mob. */
+int mac_add_mid_anchor_exact(short chtab_id, int id,
+		int anchor_x, int anchor_y, int blit, byte peel) {
+	if (id == 0) return 0;
+	image_type* image = get_image(chtab_id, id - 1);
+	if (image == NULL) return 0;
+	if (!is_native_resolution_image(image)) {
+		sbyte xh = (sbyte)(anchor_x / 8);
+		sbyte xl = (sbyte)(anchor_x % 8);
+		return add_midtable(chtab_id, id, xh, xl, anchor_y, blit, peel);
+	}
+	if (midtable_count >= 50) {
+		show_dialog("MidTable Overflow");
+		return 0;
+	}
+	short ox = 0, oy = 0;
+	bool has_origin = get_native_image_origin(image, &ox, &oy);
+	word index = midtable_count;
+	midtable_type* item = &midtable[index];
+	item->xh = (sbyte)(anchor_x / 8);
+	item->xl = (sbyte)(anchor_x % 8);
+	item->y = (short)(anchor_y - logical_image_height(image) + 1);
+	item->chtab_id = (byte)chtab_id;
+	item->id = (byte)(id - 1);
+	item->blit = blit;
+	item->physical_x = (short)(anchor_x * 2 - (has_origin ? ox : 0));
+	item->physical_y = (short)(anchor_y * 2 - (has_origin ? oy : image->h));
+	item->use_physical = 1;
+	item->peel = peel;
+	item->clip.left = obj_clip_left;
+	item->clip.right = obj_clip_right;
+	item->clip.top = obj_clip_top;
+	item->clip.bottom = obj_clip_bottom;
+	if (draw_mode) draw_mid(index);
+	++midtable_count;
+	return 1;
+}
+
+static int mac_is_palace(void) {
+	return custom->tbl_level_type[current_level] != 0;
+}
+
+static void mac_draw_left_below_corner(void) {
+	byte type = row_below_left_[drawn_col].tiletype;
+	byte mod = row_below_left_[drawn_col].modifier;
+	if ((type == tiles_7_doortop_with_floor || type == tiles_12_doortop) && mac_is_palace()) {
+		static const byte tapestry_corner[4] = {0, 0x51, 0x53, 0};
+		mac_add_back_exact(id_chtab_6_environment, tapestry_corner[mod & 3], 0, MAC_FLOOR_BOTTOM_ANCHOR, blitters_10h_transp);
+	} else if (type == tiles_20_wall) {
+		/* Only a real wall in the current column below has a FORE row that
+		 * occludes this corner. Synthetic left-level borders keep all pixels. */
+		int clip_bottom = row_below_left_[drawn_col + 1].tiletype == tiles_20_wall ?
+		                  draw_main_y * 2 + 2 : -1;
+		mac_add_back_or_fore_exact(0, id_chtab_7_environmentwall, 2, draw_xh * 8,
+		                          draw_main_y + 1 + MAC_FLOOR_BOTTOM_ANCHOR,
+		                          blitters_10h_transp, clip_bottom, -1, 0);
+	} else if (type < COUNT(tile_table)) {
+		mac_add_back_exact(id_chtab_6_environment, tile_table[type].topright_id, 0, MAC_FLOOR_BOTTOM_ANCHOR, blitters_10h_transp);
+	}
+}
+
+static int mac_can_see_bottomleft(void) {
+	return curr_tile == tiles_0_empty ||
+	       curr_tile == tiles_9_bigpillar_top ||
+	       curr_tile == tiles_12_doortop ||
+	       curr_tile == tiles_26_lattice_down;
+}
+
+static void mac_draw_left_floor_overhang(void) {
+	if (!mac_can_see_bottomleft()) return;
+
+	/* v11.8: Always submit the below-left corner. v11.7 returned here for a
+	 * depressed/stuck plate, which also dropped the corner piece. When a plate
+	 * changes state, redraw_tile_height() wipes the plate cell AND the cell to
+	 * its right to black and redraws only those two tiles, so the corner is the
+	 * only thing that fills the area under the plate's diagonal edge. With the
+	 * corner skipped, that area stayed wiped -> the reported black triangle. */
+	mac_draw_left_below_corner();
+
+	/* A depressed/stuck plate carries its complete exposed edge in native
+	 * component 0x23, whose opaque pixels already cover everything above its
+	 * diagonal. Do not add the generic 0x2A black silhouette: it is 2 rows
+	 * higher than 0x23 and has a different diagonal (v11.4..v11.6 double shadow,
+	 * v11.7 black band). mac_draw_left_other_overhang() still submits 0x23. */
+	if (tile_left == tiles_5_stuck) return;
+
+	/* v11.4: Preserve the original exposed-ledge occlusion order. The tile
+	 * below-left can contribute a top-right corner into the gap. SDLPoP then
+	 * paints the generic floor-right silhouette in BLACK before drawing the
+	 * state-specific right edge. This is an occlusion pass only: 0x2A is drawn
+	 * with the black blitter, then mac_draw_left_other_overhang() paints the
+	 * real Mac edge on top. Do not replace this with a second colored floor
+	 * component. */
+	if (tile_left < COUNT(tile_table) && tile_table[tile_left].floor_right) {
+		mac_add_floor_back_exact("right-mask", tiles_1_floor, 0, 0x2A, 0,
+			MAC_FLOOR_TOP_ANCHOR + 2, blitters_9_black);
+	}
+}
+
+static void mac_draw_below_gate_top(void) {
+	byte below_type = row_below_left_[drawn_col].tiletype;
+	byte below_mod = row_below_left_[drawn_col].modifier;
+	if ((curr_tile == tiles_9_bigpillar_top || curr_tile == tiles_0_empty || curr_tile == tiles_12_doortop) &&
+	    below_type == tiles_4_gate) {
+		byte progress = MIN(below_mod, 188) / 4;
+		mac_add_back_exact(id_chtab_6_environment, 0x44, 0, MAC_FLOOR_BOTTOM_ANCHOR, blitters_10h_transp);
+		mac_add_back_exact(id_chtab_6_environment, 0x3C + (progress % 8), 0, MAC_FLOOR_BOTTOM_ANCHOR, blitters_10h_transp);
+	}
+}
+
+static int mac_get_floor_right_piece(byte tile, byte modifier, byte neighbor,
+		int* id, int* anchor_y) {
+	mac_floor_state_type state;
+	if (!mac_get_floor_state(tile, modifier, &state)) return 0;
+	if (state.right_id == 0) return 0;
+
+	/* v11.3: Keep the Macintosh right component that belongs to the tile
+	 * state, including at an exposed edge. The DOS renderer substitutes the
+	 * normal-floor right wedge for a stuck/depressed button beside empty space,
+	 * but that rule is not valid for the native Mac art: 0x23 is the depressed
+	 * plate edge, while 0x2A is the taller/broader normal-floor wedge. Swapping
+	 * to 0x2A produces the characteristic double-width dark shadow at a gap. */
+	(void)neighbor;
+
+	*id = state.right_id;
+	*anchor_y = state.right_anchor_y;
+	return 1;
+}
+
+static void mac_draw_left_other_overhang(void) {
+	if (curr_tile == tiles_20_wall) return;
+	if (tile_left >= COUNT(tile_table)) return;
+	const piece* pc = &tile_table[tile_left];
+	/* Loose-floor right pieces are animation frames and keep their historical
+	 * ordering in mac_draw_left_animated(). All other interactive floor states
+	 * choose one state/context-specific right component here. */
+	if (tile_left != tiles_1_floor && tile_left != tiles_11_loose) {
+		int right_id = 0, right_anchor_y = 0;
+		if (mac_get_floor_right_piece(tile_left, modifier_left, curr_tile, &right_id, &right_anchor_y)) {
+			mac_add_floor_back_exact("right", tile_left, modifier_left, right_id, 0,
+				right_anchor_y, blitters_10h_transp);
+			if (mac_is_palace() && pc->stripe_id) {
+				mac_add_back_exact(id_chtab_6_environment, pc->stripe_id, 0,
+					MAC_FLOOR_TOP_ANCHOR - 0x1B, blitters_10h_transp);
+			}
+			if (tile_left == tiles_30_torch_with_debris) {
+				mac_add_back_exact(id_chtab_6_environment, 0x92, 0,
+					MAC_FLOOR_BOTTOM_ANCHOR - 0x1C, blitters_10h_transp);
+			}
+			return;
+		}
+	}
+	switch (tile_left) {
+		case tiles_0_empty: {
+			static const byte ids[4] = {0, 0x7C, 0x7D, 0x7E};
+			static const sbyte offs[4] = {0, -20, -20, 0};
+			if (modifier_left < 4) mac_add_back_exact(id_chtab_6_environment, ids[modifier_left], 0, MAC_FLOOR_TOP_ANCHOR + offs[modifier_left], blitters_10h_transp);
+		} break;
+		case tiles_1_floor: {
+			static const byte ids[4] = {0x2C, 0x7C, 0x2D, 0x2D};
+			byte mod = modifier_left > 3 ? 0 : modifier_left;
+			int right_id = 0, right_anchor_y = 0;
+			if (mac_get_floor_right_piece(tile_left, modifier_left, curr_tile, &right_id, &right_anchor_y)) {
+				mac_add_floor_back_exact("right", tile_left, modifier_left, right_id, 0,
+					right_anchor_y, blitters_10h_transp);
+			}
+			if (!mac_is_palace()) {
+				if (mod != 0) mac_add_back_exact(id_chtab_6_environment, ids[mod], 0, MAC_FLOOR_TOP_ANCHOR - 0x14, blitters_10h_transp);
+			} else if (mod != 1) {
+				mac_add_back_exact(id_chtab_6_environment, ids[mod], 0, MAC_FLOOR_TOP_ANCHOR + 2, blitters_10h_transp);
+			}
+		} break;
+		case tiles_7_doortop_with_floor:
+		case tiles_12_doortop:
+			if (mac_is_palace()) {
+				static const byte ids[4] = {0x4E, 0x50, 0x52, 0};
+				mac_add_back_exact(id_chtab_6_environment, ids[modifier_left & 3], 0,
+					MAC_FLOOR_TOP_ANCHOR + pc->right_y, blitters_10h_transp);
+			}
+			break;
+		case tiles_20_wall:
+			if (mac_is_palace() && !(modifier_left & 0x80)) {
+				mac_add_back_exact(id_chtab_6_environment, 0x54, 0x18, -0x1B, blitters_10h_transp);
+			}
+			mac_add_back_exact(id_chtab_7_environmentwall, 1, 0, MAC_FLOOR_TOP_ANCHOR + pc->right_y, blitters_10h_transp);
+			break;
+		default:
+			if (pc->right_id) mac_add_back_exact(id_chtab_6_environment, pc->right_id, 0, MAC_FLOOR_TOP_ANCHOR + pc->right_y, blitters_10h_transp);
+			if (mac_is_palace() && pc->stripe_id) mac_add_back_exact(id_chtab_6_environment, pc->stripe_id, 0, MAC_FLOOR_TOP_ANCHOR - 0x1B, blitters_10h_transp);
+			if (tile_left == tiles_19_torch || tile_left == tiles_30_torch_with_debris) {
+				mac_add_back_exact(id_chtab_6_environment, 0x92, 0, MAC_FLOOR_BOTTOM_ANCHOR - 0x1C, blitters_10h_transp);
+			}
+			break;
+	}
+}
+
+static void mac_draw_gate_parts(int fore) {
+	byte progress = MIN(modifier_left, 188) / 4;
+	int gate_anchor_y = MAC_FLOOR_TOP_ANCHOR - (progress + 1);
+	#define MAC_GATE_ADD(id, dx, dy) do { \
+		if (fore) mac_add_fore_exact(id_chtab_6_environment, (id), (dx), (dy), blitters_10h_transp); \
+		else mac_add_back_exact(id_chtab_6_environment, (id), (dx), (dy), blitters_10h_transp); \
+	} while (0)
+	if (fore) {
+		/* Match draw_gate_fore(): only moving bars belong over the actor.
+		 * Repainting the baked floor wedge here leaves a dark diagonal strip. */
+		MAC_GATE_ADD(0x33, 0, gate_anchor_y - 2);
+	} else if ((gate_anchor_y + 12) < MAC_FLOOR_TOP_ANCHOR) {
+		MAC_GATE_ADD(0x32, 0, gate_anchor_y);
+	} else {
+		MAC_GATE_ADD(tile_table[tiles_4_gate].right_id, 0, MAC_FLOOR_TOP_ANCHOR + tile_table[tiles_4_gate].right_y);
+		MAC_GATE_ADD(0x33, 0, gate_anchor_y - 2);
+	}
+	int delta_y = gate_anchor_y - 12;
+	for (; delta_y >= MAC_CELL_TOP_ANCHOR + 8; delta_y -= 8) MAC_GATE_ADD(0x34, 0, delta_y);
+	int partial = delta_y - MAC_CELL_TOP_ANCHOR;
+	if (!fore && partial >= 0 && partial < 8) MAC_GATE_ADD(0x3B - partial, 0, delta_y);
+	#undef MAC_GATE_ADD
+}
+
+/* A full native panel replaces the DOS stack of four-pixel slices. Map the
+ * existing 0..43 animation phase to its SHPD-registered height so closed meets
+ * the lintel and fully open retracts completely. Gameplay keeps its modifiers. */
+static int mac_leveldoor_geometry(int anchor_x, int anchor_y, byte modifier,
+                                 rect_type* opening, int* lift) {
+	image_type* door = get_image(id_chtab_6_environment, 0x21 - 1);
+	short ox, oy;
+	if (!door || !get_native_image_origin(door, &ox, &oy)) return 0;
+	opening->left = anchor_x * 2 - ox;
+	opening->top = anchor_y * 2 - oy;
+	opening->right = opening->left + door->w;
+	opening->bottom = opening->top + door->h;
+	*lift = (MIN(modifier, 43) * door->h + 21) / 43;
+	return 1;
+}
+
+int mac_get_leveldoor_clip(rect_type* clip) {
+	if (!uses_mac_native_full() || !Char.room || Char.room > 24 || Char.curr_row < 0 || Char.curr_row > 2) return 0;
+	/* Resolve the exit beside this actor, rather than using globals left by
+	 * another door/row or by an earlier room. Do not mutate tile lookup state. */
+	int best = -1, distance = 10000;
+	for (int col = 0; col < 10; ++col) {
+		int pos = (Char.room - 1) * 30 + Char.curr_row * 10 + col;
+		if ((level.fg[pos] & 0x1F) != tiles_16_level_door_left) continue;
+		int d = abs(Char.curr_col - col);
+		if (d < distance) { best = pos; distance = d; }
+	}
+	if (best < 0) return 0;
+	rect_type opening;
+	int lift;
+	if (!mac_leveldoor_geometry((best % 10 + 1) * 32 + 8,
+	                           Char.curr_row * 63 + 63 + MAC_FLOOR_TOP_ANCHOR - 13,
+	                           level.bg[best], &opening, &lift)) return 0;
+	clip->top = (opening.bottom - lift + 1) / 2;
+	clip->right = opening.right / 2;
+	return 1;
+}
+
+static void mac_draw_left_animated(void) {
+	switch (tile_left) {
+		case tiles_2_spike: {
+			static const byte ids[10] = {0,0x86,0x87,0x88,0x89,0x8A,0x89,0x87,0x86,0};
+			byte frame = (modifier_left & 0x80) ? 5 : MIN(modifier_left, 9);
+			mac_add_floor_back_exact("spike-right-anim", tile_left, modifier_left, ids[frame], 0,
+				MAC_FLOOR_TOP_ANCHOR - 7, blitters_10h_transp);
+		} break;
+		case tiles_4_gate:
+			mac_draw_gate_parts(0);
+			break;
+		case tiles_11_loose: {
+			mac_floor_state_type state;
+			if (mac_get_floor_state(tile_left, modifier_left, &state)) {
+				mac_add_floor_back_exact("right", tile_left, modifier_left, state.right_id, 0,
+					state.right_anchor_y, blitters_10h_transp);
+			}
+		} break;
+		case tiles_16_level_door_left: {
+			int passage_y = MAC_FLOOR_TOP_ANCHOR - 0x0D;
+			rect_type opening;
+			int lift;
+			if (!mac_leveldoor_geometry(draw_xh * 8 + 8, draw_main_y + 1 + passage_y,
+			                            modifier_left, &opening, &lift)) break;
+			/* The closed panel's native top meets the carved lintel. CELL_TOP
+			 * is 13/16 physical pixels lower and introduced a black gap. */
+			int clip_top = opening.top;
+			int clip_bottom = opening.bottom;
+			leveldoor_ybottom = (opening.bottom - lift + 1) / 2 - 1;
+			leveldoor_right = opening.right / 2;
+			int saved_mid = mac_back_to_mid;
+			mac_back_to_mid = 0; // Legacy draw_leveldoor() also keeps these pieces in BACK.
+			/* Match the Mac layering: passage, moving door, optional stairs, then
+			 * the door once more so it remains in front of the exit stair art. */
+			mac_add_back_exact(id_chtab_6_environment, 0x63, 8, passage_y, blitters_10h_transp);
+			mac_add_back_or_fore_exact(0, id_chtab_6_environment, 0x21,
+			                          draw_xh * 8 + 8, draw_main_y + 1 + passage_y,
+			                          blitters_10h_transp, clip_bottom, clip_top, -lift);
+			if (level.start_room != drawn_room && modifier_left != 0) {
+				mac_add_back_exact(id_chtab_6_environment, 0x90, 8, passage_y, blitters_10h_transp);
+				mac_add_back_or_fore_exact(0, id_chtab_6_environment, 0x21,
+				                          draw_xh * 8 + 8, draw_main_y + 1 + passage_y,
+				                          blitters_10h_transp, clip_bottom, clip_top, -lift);
+			}
+			mac_back_to_mid = saved_mid;
+		} break;
+		case tiles_19_torch:
+		case tiles_30_torch_with_debris:
+			if (modifier_left < 9) {
+				int y = MAC_FLOOR_TOP_ANCHOR - (mac_is_palace() ? 0x2A : 0x28);
+				mac_add_back_exact(id_chtab_1_flameswordpotion, modifier_left + 1, 8 + mac_is_palace(), y, blitters_10h_transp);
+			}
+			break;
+	}
+}
+
+static void mac_draw_current_floor_front(void) {
+	mac_floor_state_type floor_state;
+	if (mac_get_floor_state(curr_tile, curr_modifier, &floor_state)) {
+		mac_add_floor_back_exact("front", curr_tile, curr_modifier, floor_state.front_id, 0,
+			floor_state.front_anchor_y, blitters_10h_transp);
+		return;
+	}
+
+	int id = 0;
+	short chtab = id_chtab_6_environment;
+	if (curr_tile == tiles_20_wall) {
+		if (mac_is_palace()) { mac_draw_palace_wall(0); return; }
+		static const byte dungeon_ids[4] = {7,9,5,3};
+		chtab = id_chtab_7_environmentwall;
+		id = mac_is_palace() ? 3 : dungeon_ids[curr_modifier & 3];
+	} else if (curr_tile < COUNT(tile_table)) {
+		id = tile_table[curr_tile].bottom_id;
+	}
+	mac_add_back_exact(chtab, id, 0, MAC_FLOOR_BOTTOM_ANCHOR, blitters_10h_transp);
+}
+
+static int mac_lattice_in_foreground(void) {
+#ifdef USE_SUPER_HIGH_JUMP
+	return fixes->enable_super_high_jump &&
+	       ((curr_tile >= tiles_26_lattice_down && curr_tile <= tiles_29_lattice_right) ||
+	        (tile_left == tiles_26_lattice_down && curr_tile == tiles_12_doortop));
+#else
+	return 0;
+#endif
+}
+
+static void mac_draw_current_floor_top(void) {
+	if (curr_tile >= COUNT(tile_table)) return;
+	/* Preserve the existing high-jump occlusion rule with native origins. */
+	if (mac_lattice_in_foreground()) return;
+	mac_floor_state_type floor_state;
+	if (mac_get_floor_state(curr_tile, curr_modifier, &floor_state)) {
+		int id = floor_state.base_id;
+		/* The open-button edge variant is a distinct Mac component when the
+		 * neighboring tile is empty; keep the same state anchor. */
+		if (curr_tile == tiles_15_opener && tile_left == tiles_0_empty) id = 0x94;
+		mac_add_floor_back_exact("base", curr_tile, curr_modifier, id, 0,
+			floor_state.base_anchor_y, blitters_10h_transp);
+		return;
+	}
+
+	int id;
+	int y = MAC_FLOOR_TOP_ANCHOR;
+	if (tile_left == tiles_26_lattice_down && curr_tile == tiles_12_doortop) {
+		id = 6; y += 3;
+	} else {
+		id = tile_table[curr_tile].base_id;
+	}
+	mac_add_back_exact(id_chtab_6_environment, id, 0, y + tile_table[curr_tile].base_y, blitters_10h_transp);
+}
+
+static int mac_potion_bubble_id(byte bg) {
+	static const byte base_ids[8] = {0,0x10,0x11,0x12,0x13,0x14,0x15,0};
+	/* Original Mac CODE 4:$42F8: empty/life have no bubbles, feather/invert
+	 * are green, hurt/open blue. Translate SDLPoP's effect bits (3..7);
+	 * reading the Mac $E0 field directly confuses effect and animation bits. */
+	static const sbyte color_offsets[7] = {-1,0,-1,6,6,12,12};
+	byte frame = bg & 7;
+	byte type = bg >> 3;
+	int id = base_ids[frame];
+	if (type < COUNT(color_offsets)) {
+		if (color_offsets[type] < 0) return 0;
+		if (id) id += color_offsets[type];
+	}
+	return id;
+}
+
+static void mac_draw_current_animated(void) {
+	switch (curr_tile) {
+		case tiles_2_spike: {
+			static const byte ids[10] = {0,0x80,0x81,0x82,0x83,0x84,0x83,0x81,0x80,0};
+			byte frame = (curr_modifier & 0x80) ? 5 : MIN(curr_modifier, 9);
+			mac_add_floor_back_exact("spike-back", curr_tile, curr_modifier, ids[frame], 0,
+				MAC_FLOOR_TOP_ANCHOR - 2, blitters_10h_transp);
+		} break;
+		case tiles_10_potion:
+			mac_add_back_exact(id_chtab_1_flameswordpotion, mac_potion_bubble_id(curr_modifier), 25, MAC_FLOOR_TOP_ANCHOR - 14, blitters_10h_transp);
+			break;
+		case tiles_18_chomper: {
+			static const byte vf[7] = {3,2,0,1,4,3,3};
+			static const byte bot[5] = {0x65,0x66,0x67,0x68,0x69};
+			static const byte top[5] = {0,0,0x6F,0x70,0x71};
+			static const byte top_y[5] = {0,0,0x25,0x2F,0x32};
+			byte f = vf[MIN(curr_modifier & 0x7F, 6)];
+			mac_add_back_exact(id_chtab_6_environment, bot[f], 0, MAC_FLOOR_TOP_ANCHOR, blitters_10h_transp);
+			mac_add_back_exact(id_chtab_6_environment, top[f], 0, MAC_FLOOR_TOP_ANCHOR - top_y[f], blitters_10h_transp);
+			if (curr_modifier & 0x80) mac_add_back_exact(id_chtab_6_environment, f + 0x72, 12, MAC_FLOOR_TOP_ANCHOR - 6, blitters_10h_transp);
+		} break;
+		case tiles_22_sword:
+			mac_add_back_exact(id_chtab_1_flameswordpotion, 10 + (curr_modifier == 1), 0, MAC_FLOOR_TOP_ANCHOR - 3, blitters_10h_transp);
+			break;
+	}
+}
+
+static void mac_draw_current_foreground(void) {
+	if (tile_left == tiles_4_gate && Kid.curr_row == drawn_row && Kid.curr_col == drawn_col - 1 && Kid.room != room_R) {
+		mac_draw_gate_parts(1);
+	}
+	if (curr_tile >= COUNT(tile_table)) return;
+	const piece* pc = &tile_table[curr_tile];
+	switch (curr_tile) {
+		case tiles_2_spike: {
+			static const byte ids[10] = {0,0x8B,0x8C,0x8D,0x8E,0x8F,0x8E,0x8C,0x8B,0};
+			byte frame = (curr_modifier & 0x80) ? 5 : MIN(curr_modifier, 9);
+			mac_add_floor_fore_exact("spike-fore", curr_tile, curr_modifier, ids[frame], 0,
+				MAC_FLOOR_TOP_ANCHOR - 2, blitters_10h_transp);
+		} break;
+		case tiles_10_potion: {
+			/* CODE 4:$41BC selects the tall Mac bottle only for life. */
+			int id = pc->fore_id + 2 * mac_is_palace() + ((curr_modifier >> 3) == 2);
+			mac_add_fore_exact(id_chtab_1_flameswordpotion, id, pc->fore_x * 8 + 6, MAC_FLOOR_TOP_ANCHOR + pc->fore_y, blitters_10h_transp);
+			mac_add_fore_exact(id_chtab_1_flameswordpotion, mac_potion_bubble_id(curr_modifier), 25, MAC_FLOOR_TOP_ANCHOR - 14, blitters_10h_transp);
+		} break;
+		case tiles_18_chomper: {
+			static const byte vf[7] = {3,2,0,1,4,3,3};
+			static const byte ids[5] = {0x6A,0x6B,0x6C,0x6D,0x6E};
+			byte f = vf[MIN(curr_modifier & 0x7F, 6)];
+			mac_add_fore_exact(id_chtab_6_environment, ids[f], 0, MAC_FLOOR_TOP_ANCHOR, blitters_10h_transp);
+			if (curr_modifier & 0x80) mac_add_fore_exact(id_chtab_6_environment, f + 0x77, 12, MAC_FLOOR_TOP_ANCHOR - 6, blitters_10h_transp);
+		} break;
+		case tiles_3_pillar:
+			/* v11.13: Keep the native pillar foreground in FORE during climb-up.
+			 * Original Mac layering uses this face to hide the Prince's lower
+			 * body behind the pillar/ledge while the dedicated climb MID overlay
+			 * handles the thin floor lip. */
+			if (pc->fore_id) mac_add_fore_exact(id_chtab_6_environment, pc->fore_id,
+				pc->fore_x * 8, MAC_FLOOR_TOP_ANCHOR + pc->fore_y, blitters_10h_transp);
+			break;
+		case tiles_20_wall: {
+			static const byte dungeon_ids[4] = {0x08,0x0A,0x06,0x04};
+			if (mac_is_palace()) { mac_draw_palace_wall(1); break; }
+			mac_add_fore_exact(id_chtab_7_environmentwall, dungeon_ids[curr_modifier & 3], 0, MAC_FLOOR_TOP_ANCHOR, blitters_10h_transp);
+		} break;
+		default:
+			if (mac_lattice_in_foreground()) {
+				int combined = tile_left == tiles_26_lattice_down && curr_tile == tiles_12_doortop;
+				mac_add_fore_exact(id_chtab_6_environment, combined ? 6 : pc->base_id, 0,
+				                   MAC_FLOOR_TOP_ANCHOR + pc->base_y + (combined ? 3 : 0), blitters_10h_transp);
+			}
+			if (pc->fore_id) mac_add_fore_exact(id_chtab_6_environment, pc->fore_id, pc->fore_x * 8, MAC_FLOOR_TOP_ANCHOR + pc->fore_y, blitters_10h_transp);
+			break;
+	}
+}
+
+static void mac_draw_tile_exact(void) {
+	mac_draw_left_floor_overhang();
+	mac_draw_below_gate_top();
+	mac_draw_left_other_overhang();
+	mac_draw_left_animated();
+	mac_draw_current_floor_front();
+	mac_draw_current_floor_top();
+	mac_draw_current_animated();
+	mac_draw_current_foreground();
+}
+
+/* v11.18: Match draw_tile2()/draw_other_overlay() without DOS placement or
+ * a full-tile/foreground redraw. Airborne actors are submitted at an earlier
+ * tile; these native pieces must follow them in MID to occlude the overlap. */
+static void mac_draw_overlay_components(int mid) {
+	mac_back_to_mid = mid;
+	mac_draw_left_other_overhang();
+	mac_draw_left_animated();
+	mac_draw_current_floor_front();
+	mac_draw_current_floor_top();
+	mac_draw_current_animated();
+	mac_back_to_mid = 0;
+}
+
+static void mac_draw_other_overlay_exact(void) {
+	byte type, modifier;
+	if (tile_left == tiles_0_empty) {
+		mac_draw_overlay_components(1);
+	} else if (curr_tile != tiles_0_empty && drawn_col > 0 &&
+	           get_tile_to_draw(drawn_room, drawn_col - 2, drawn_row,
+	                            &type, &modifier, tiles_0_empty) == tiles_0_empty) {
+		mac_draw_overlay_components(1);
+		mac_draw_overlay_components(0);
+		tile_object_redraw[tbl_line[drawn_row] + drawn_col] = 0xFF;
+	}
+}
+
+static void mac_draw_tile_above_exact(void) {
+	/* Match SDLPoP's above-room partial draw: only pieces that can protrude into
+	 * the visible room are submitted. Exact origins still allow odd-pixel edges. */
+	mac_draw_left_floor_overhang();
+	mac_draw_below_gate_top();
+	mac_draw_left_other_overhang();
+	mac_draw_current_floor_front();
+	mac_draw_current_foreground();
+}
 
 // seg008:0006
 void redraw_room() {
@@ -153,6 +938,10 @@ void draw_room() {
 
 // seg008:01C7
 void draw_tile() {
+	if (uses_mac_native_full()) {
+		mac_draw_tile_exact();
+		return;
+	}
 	draw_tile_floorright();
 	draw_tile_anim_topright();
 	draw_tile_right();
@@ -166,6 +955,10 @@ void draw_tile() {
 
 // seg008:01F2
 void draw_tile_aboveroom() {
+	if (uses_mac_native_full()) {
+		mac_draw_tile_above_exact();
+		return;
+	}
 	draw_tile_floorright();
 	draw_tile_anim_topright();
 	draw_tile_right();
@@ -179,6 +972,67 @@ void redraw_needed(short tilepos) {
 	if (wipe_frames[tilepos]) {
 		--wipe_frames[tilepos];
 		draw_tile_wipe(wipe_heights[tilepos]);
+	}
+	if (uses_mac_native_full()) {
+		int redraw_mac_tile = 0;
+		int redraw_mac_floor_overlay = 0;
+		int redraw_mac_other_overlay = 0;
+		int redraw_mac_fore = 0;
+		if (redraw_frames_full[tilepos]) { --redraw_frames_full[tilepos]; redraw_mac_tile = 1; }
+		if (redraw_frames_anim[tilepos]) { --redraw_frames_anim[tilepos]; redraw_mac_tile = 1; }
+		if (redraw_frames2[tilepos]) { --redraw_frames2[tilepos]; redraw_mac_other_overlay = 1; }
+		if (redraw_frames_floor_overlay[tilepos]) {
+			--redraw_frames_floor_overlay[tilepos];
+			/* v11.10: match the legacy compositor exactly here. A floor-overlay
+			 * request is NOT a full tile redraw. Only the dedicated MID-table
+			 * climb overlay belongs to this flag. */
+			redraw_mac_floor_overlay = 1;
+		}
+		if (redraw_frames_fore[tilepos]) {
+			--redraw_frames_fore[tilepos];
+			/* v11.11: foreground redraws are also NOT full-tile redraws. The
+			 * legacy path calls draw_tile_fore() here after the actor/object pass.
+			 * Keeping this as a distinct phase prevents floor/back pieces from
+			 * being redundantly re-submitted while preserving pillar depth. */
+			redraw_mac_fore = 1;
+		}
+		if (redraw_mac_tile) {
+			mac_draw_tile_exact();
+			/* Dungeon big-pillar-top FORE res291 begins one physical row above
+			 * its logical cell (SHPD origin Y=125). A refresh of the floor above
+			 * can erase that cap. Restore only its overlap in FORE, preserving the
+			 * lower pillar's actor ordering and all unrelated cells. */
+			byte below = row_below_left_[drawn_col + 1].tiletype;
+			if (drawn_row < 2 && below == tiles_9_bigpillar_top) {
+				const piece* pc = &tile_table[below];
+				image_type* cap = get_image(id_chtab_6_environment, pc->fore_id - 1);
+				short ox, oy;
+				int anchor_y = draw_main_y + 1 + 63 + MAC_FLOOR_TOP_ANCHOR + pc->fore_y;
+				int boundary = (draw_main_y + 1) * 2;
+				if (cap && get_native_image_origin(cap, &ox, &oy) && anchor_y * 2 - oy < boundary)
+					mac_add_back_or_fore_exact(1, id_chtab_6_environment, pc->fore_id,
+					                          (draw_xh + pc->fore_x) * 8, anchor_y,
+					                          blitters_10h_transp, boundary, -1, 0);
+			}
+			/* v11.19: A native wall side starts one physical row inside the
+			 * corner from the tile above. Restore that higher-priority corner
+			 * later in this bottom-to-top pass, as a full room draw does. This
+			 * also preserves the original synthetic left-level border artwork. */
+			if (drawn_row > 0 && tile_left == tiles_20_wall && curr_tile != tiles_20_wall) {
+				set_redraw_full(get_tilepos(drawn_col, drawn_row - 1), 1);
+			}
+		}
+		if (redraw_mac_other_overlay) mac_draw_other_overlay_exact();
+		if (redraw_mac_floor_overlay) mac_draw_floor_overlay_exact();
+		if (tile_object_redraw[tilepos]) {
+			if (tile_object_redraw[tilepos] == 0xFF) draw_objtable_items_at_tile(tilepos - 1);
+			draw_objtable_items_at_tile(tilepos);
+			tile_object_redraw[tilepos] = 0;
+		}
+		if (redraw_mac_fore) {
+			mac_draw_current_foreground();
+		}
+		return;
 	}
 	if (redraw_frames_full[tilepos]) {
 		--redraw_frames_full[tilepos];
@@ -221,6 +1075,10 @@ void redraw_needed(short tilepos) {
 void redraw_needed_above(int column) {
 	if (redraw_frames_above[column] != 0) {
 		--redraw_frames_above[column];
+		if (uses_mac_native_full()) {
+			mac_draw_tile_above_exact();
+			return;
+		}
 #ifdef FIX_BIGPILLAR_JUMP_UP
 		if (curr_tile != tiles_9_bigpillar_top)
 #endif
@@ -379,7 +1237,7 @@ void load_rowbelow() {
 		row_below = drawn_row + 1;
 	}
 	get_room_address(room);
-	for (word column = 1; column < 10; ++column) {
+	for (word column = 1; column <= 10; ++column) {
 		get_tile_to_draw(room, column - 1, row_below, &row_below_left_[column].tiletype, &row_below_left_[column].modifier, tiles_0_empty);
 	}
 	get_room_address(room_left);
@@ -480,13 +1338,29 @@ void draw_tile_right() {
 				} else {
 					blit = blitters_2_or;
 				}
-				add_backtable(id_chtab_6_environment, id, draw_xh, 0, tile_table[tile_left].right_y + draw_main_y, blit, 0);
+				int right_ybottom = tile_table[tile_left].right_y + draw_main_y;
+				if (uses_mac_native_full() && id == 42) {
+					/* Native Mac floor overhang 0x2A: Mac draws it from
+					 * FLOOR_TOP_ANCHOR(-4)+2.  With its 31px/oy=28 shape,
+					 * the DOS bottom anchor lands 4 physical pixels too low. */
+					right_ybottom -= 2;
+				}
+				add_backtable(id_chtab_6_environment, id, draw_xh, 0, right_ybottom, blit, 0);
 			}
 			if (custom->tbl_level_type[current_level] != 0) {
 				add_backtable(id_chtab_6_environment, tile_table[tile_left].stripe_id, draw_xh, 0, draw_main_y - 27, blitters_2_or, 0);
 			}
 			if (tile_left == tiles_19_torch || tile_left == tiles_30_torch_with_debris) {
-				add_backtable(id_chtab_6_environment, 146 /*torch base*/, draw_xh, 0, draw_bottom_y - 28, blitters_0_no_transp, 0);
+				if (uses_mac_native_full()) {
+					/* Macintosh COLOR SHPD 1200 image 0x92 has origin (-21,30).
+					 * The Mac renderer anchors this image 28 anchor units above
+					 * FLOOR_BOTTOM. In our 320x200 logical coordinate system,
+					 * xh+1,xl=2 lands within one native pixel of the exact
+					 * odd-pixel Mac X origin; y=-31 reproduces the native Y. */
+					add_backtable(id_chtab_6_environment, 146 /* Mac torch sconce */, draw_xh + 1, 2, draw_bottom_y - 31, blitters_0_no_transp, 0);
+				} else {
+					add_backtable(id_chtab_6_environment, 146 /*torch base*/, draw_xh, 0, draw_bottom_y - 28, blitters_0_no_transp, 0);
+				}
 			}
 			break;
 		case tiles_0_empty:
@@ -558,7 +1432,13 @@ void draw_tile_anim_right() {
 				}
 #endif
 				// images 1..9 are the flames
-				add_backtable(id_chtab_1_flameswordpotion, modifier_left + 1, draw_xh + 1, 0, draw_main_y - 40, blit, 0);
+				if (uses_mac_native_full()) {
+					/* Native Mac flames use origin_y=34 and are anchored three
+					 * logical pixels higher than the DOS compositor. */
+					add_backtable(id_chtab_1_flameswordpotion, modifier_left + 1, draw_xh + 1, 0, draw_main_y - 43, blit, 0);
+				} else {
+					add_backtable(id_chtab_1_flameswordpotion, modifier_left + 1, draw_xh + 1, 0, draw_main_y - 40, blit, 0);
+				}
 			}
 		break;
 	}
@@ -573,7 +1453,7 @@ void draw_tile_bottom(word arg_0) {
 	word chtab_id = id_chtab_6_environment;
 	switch (curr_tile) {
 		case tiles_20_wall:
-			if (custom->tbl_level_type[current_level] == 0 || custom->enable_wda_in_palace || graphics_mode != gmMcgaVga) {
+			if (custom->tbl_level_type[current_level] == 0 || custom->enable_wda_in_palace || graphics_mode != gmMcgaVga || strcasecmp(graphics_pack_name, "dos") != 0) {
 				id = wall_fram_bottom[curr_modifier & 0x7F];
 			}
 			chtab_id = id_chtab_7_environmentwall;
@@ -585,10 +1465,21 @@ void draw_tile_bottom(word arg_0) {
 			id = tile_table[curr_tile].bottom_id;
 			break;
 	}
-	if (ptr_add_table(chtab_id, id, draw_xh, 0, draw_bottom_y, blit, 0) && arg_0) {
-		add_foretable(chtab_id, id, draw_xh, 0, draw_bottom_y, blit, 0);
+	int bottom_y = draw_bottom_y;
+	if (uses_mac_native_full() &&
+	    chtab_id == id_chtab_6_environment && id != 0) {
+		/* Mac floor-front pieces are anchored at FLOOR_BOTTOM_ANCHOR=-1.
+		 * The DOS compositor's baseline is 3 logical pixels lower. */
+		bottom_y -= 3;
 	}
-	if (chtab_id == id_chtab_7_environmentwall && graphics_mode != gmCga && graphics_mode != gmHgaHerc) {
+	if (ptr_add_table(chtab_id, id, draw_xh, 0, bottom_y, blit, 0) && arg_0) {
+		add_foretable(chtab_id, id, draw_xh, 0, bottom_y, blit, 0);
+	}
+	if (chtab_id == id_chtab_7_environmentwall && graphics_mode != gmCga && graphics_mode != gmHgaHerc &&
+	    !uses_mac_native_full()) {
+		/* The Macintosh wall SHPD contains complete wall faces/dividers.
+		 * DOS wall_pattern() adds a second synthetic WDA layer and produces
+		 * the gray rectangular intrusions seen with the native Mac pack. */
 		wall_pattern(0, 0);
 	}
 }
@@ -600,8 +1491,10 @@ void draw_loose(int arg_0) {
 	word id;
 	if (curr_tile == tiles_11_loose) {
 		id = loose_fram_bottom[get_loose_frame(curr_modifier)];
-		add_backtable(id_chtab_6_environment, id, draw_xh, 0, draw_bottom_y, blitters_0_no_transp, 0);
-		add_foretable(id_chtab_6_environment, id, draw_xh, 0, draw_bottom_y, blitters_0_no_transp, 0);
+		int loose_bottom_y = draw_bottom_y;
+		if (uses_mac_native_full()) loose_bottom_y -= 3;
+		add_backtable(id_chtab_6_environment, id, draw_xh, 0, loose_bottom_y, blitters_0_no_transp, 0);
+		add_foretable(id_chtab_6_environment, id, draw_xh, 0, loose_bottom_y, blitters_0_no_transp, 0);
 	}
 }
 
@@ -611,6 +1504,17 @@ const byte loose_fram_left[] = {41, 69, 41, 70, 70, 41, 41, 41, 70, 70, 70, 0};
 void draw_tile_base() {
 	word id;
 	word ybottom = draw_main_y;
+	if (uses_mac_native_full()) {
+		/* Native Mac floor-top pieces use FLOOR_TOP_ANCHOR=-4.  The DOS
+		 * compositor baseline places these 6 physical pixels too low. */
+		ybottom -= 3;
+		/* v8: button / press-plate tops were lifted a little too aggressively by the
+		 * generic floor correction, which widened their dark lip into a two-tile
+		 * looking shadow.  Give button-floor tops one logical pixel back. */
+		if (curr_tile == tiles_5_stuck || curr_tile == tiles_15_opener) {
+			ybottom += 1;
+		}
+	}
 #ifdef USE_SUPER_HIGH_JUMP
 	// Latice tiles are drawn in the draw_tile_fore() method.
 	if (fixes->enable_super_high_jump) {
@@ -708,10 +1612,13 @@ void draw_tile_fore() {
 			}
 			break;
 		case tiles_20_wall:
-			if (custom->tbl_level_type[current_level] == 0 || custom->enable_wda_in_palace || graphics_mode != gmMcgaVga) {
+			if (custom->tbl_level_type[current_level] == 0 || custom->enable_wda_in_palace || graphics_mode != gmMcgaVga || strcasecmp(graphics_pack_name, "dos") != 0) {
 				add_foretable(id_chtab_7_environmentwall, wall_fram_main[curr_modifier & 0x7F], draw_xh, 0, draw_main_y, blitters_0_no_transp, 0);
 			}
-			if (graphics_mode != gmCga && graphics_mode != gmHgaHerc) {
+			if (graphics_mode != gmCga && graphics_mode != gmHgaHerc &&
+			    !uses_mac_native_full()) {
+				/* Do not overlay DOS procedural/WDA wall decoration on native
+				 * Macintosh wall blocks. */
 				wall_pattern(1, 1);
 			}
 			break;
@@ -806,8 +1713,13 @@ int add_backtable(short chtab_id, int id, sbyte xh, sbyte xl, int ybottom, int b
 	if (image == NULL) {
 		return 0;
 	}
-	backtable_item->y = ybottom - image->h/*height*/ + 1;
+	backtable_item->y = ybottom - logical_image_height(image) + 1;
 	backtable_item->blit = blit;
+	backtable_item->use_physical = 0;
+	backtable_item->physical_x = 0;
+	backtable_item->physical_y = 0;
+	backtable_item->physical_clip_bottom = -1;
+	backtable_item->physical_clip_top = -1;
 	if (draw_mode) {
 		draw_back_fore(0, index);
 	}
@@ -816,10 +1728,39 @@ int add_backtable(short chtab_id, int id, sbyte xh, sbyte xl, int ybottom, int b
 }
 
 // seg008:1017
+/* v7: Add a native image at an exact 640x400 top-left position.
+ * Used by cutscene props whose attachment point is baked into a native full-
+ * screen background (for example the Princess-room wall sconces). */
+int add_backtable_physical(short chtab_id, int id, int physical_x, int physical_y, int blit) {
+	if (id == 0) return 0;
+	word index = backtable_count;
+	if (index >= 200) {
+		show_dialog("BackTable Overflow");
+		return 0;
+	}
+	image_type* image = get_image(chtab_id, id - 1);
+	if (image == NULL) return 0;
+	back_table_type* item = &backtable[index];
+	item->xh = (sbyte)((physical_x / 2) / 8);
+	item->xl = (sbyte)((physical_x / 2) % 8);
+	item->y = (short)(physical_y / 2);
+	item->chtab_id = (byte)chtab_id;
+	item->id = (byte)(id - 1);
+	item->blit = blit;
+	item->physical_x = (short)physical_x;
+	item->physical_y = (short)physical_y;
+	item->physical_clip_bottom = -1;
+	item->physical_clip_top = -1;
+	item->use_physical = 1;
+	if (draw_mode) draw_back_fore(0, index);
+	++backtable_count;
+	return 1;
+}
+
 int add_foretable(short chtab_id, int id, sbyte xh, sbyte xl, int ybottom, int blit, byte peel) {
 	if (id == 0) return 0;
 	word index = foretable_count;
-	if (index >= 200) {
+	if (index >= FORETABLE_MAX) {
 		show_dialog("ForeTable Overflow");
 		return 0; // added
 	}
@@ -832,8 +1773,13 @@ int add_foretable(short chtab_id, int id, sbyte xh, sbyte xl, int ybottom, int b
 	if (image == NULL) {
 		return 0;
 	}
-	foretable_item->y = ybottom - image->h/*height*/ + 1;
+	foretable_item->y = ybottom - logical_image_height(image) + 1;
 	foretable_item->blit = blit;
+	foretable_item->use_physical = 0;
+	foretable_item->physical_x = 0;
+	foretable_item->physical_y = 0;
+	foretable_item->physical_clip_bottom = -1;
+	foretable_item->physical_clip_top = -1;
 	if (draw_mode) {
 		draw_back_fore(1, index);
 	}
@@ -860,11 +1806,14 @@ int add_midtable(short chtab_id, int id, sbyte xh, sbyte xl, int ybottom, int bl
 	if (image == NULL) {
 		return 0;
 	}
-	midtable_item->y = ybottom - image->h/*height*/ + 1;
+	midtable_item->y = ybottom - logical_image_height(image) + 1;
 	if (obj_direction == dir_0_right && chtab_flip_clip[chtab_id] != 0) {
 		blit += 0x80;
 	}
 	midtable_item->blit = blit;
+	midtable_item->use_physical = 0;
+	midtable_item->physical_x = 0;
+	midtable_item->physical_y = 0;
 	midtable_item->peel = peel;
 	midtable_item->clip.left = obj_clip_left;
 	midtable_item->clip.right = obj_clip_right;
@@ -944,6 +1893,11 @@ void draw_back_fore(int which_table,int index) {
 	} else /* if (which_table == 1) this is always true */ {
 		table_entry = &foretable[index];
 	}
+	if (table_entry->use_physical == native_entry_fill) {
+		draw_native_rect_physical(table_entry->physical_x, table_entry->physical_y,
+		                          table_entry->physical_w, table_entry->physical_h, table_entry->fill_rgb);
+		return;
+	}
 	image = mask = get_image(table_entry->chtab_id, table_entry->id);
 	/*
 	if ((graphics_mode == gmCga || graphics_mode == gmHgaHerc) &&
@@ -952,7 +1906,32 @@ void draw_back_fore(int which_table,int index) {
 		mask = chtab->images[chtab->n_images / 2 + table_entry->id];
 	}
 	*/
-	draw_image(image, mask, table_entry->xh * 8 + table_entry->xl, table_entry->y, table_entry->blit);
+	if (table_entry->use_physical && is_native_resolution_image(image)) {
+		/* v11.19: The dungeon wall's below-left corner (res362) extends one
+		 * native row past the floor front. A full room draw covers that row
+		 * with the wall FORE below, but an upper-tile redraw does not repaint
+		 * the lower wall. Keep the corner above that boundary so spike/button/
+		 * debris updates cannot overpaint its top edge. Preserve SHPD placement
+		 * and the caller's clip; palace corners already end at this boundary. */
+		SDL_Rect saved_clip;
+		bool clip_native = table_entry->physical_clip_bottom >= 0 || table_entry->physical_clip_top >= 0;
+		if (clip_native) {
+			SDL_GetClipRect(current_target_surface, &saved_clip);
+			SDL_Rect clip = saved_clip;
+			int bottom = table_entry->physical_clip_bottom;
+			if (bottom >= 0 && clip.y + clip.h > bottom) clip.h = MAX(0, bottom - clip.y);
+			if (table_entry->physical_clip_top >= 0 && clip.y < table_entry->physical_clip_top) {
+				int top = table_entry->physical_clip_top;
+				clip.h = MAX(0, clip.y + clip.h - top);
+				clip.y = top;
+			}
+			SDL_SetClipRect(current_target_surface, &clip);
+		}
+		draw_native_image_physical_blit(image, table_entry->physical_x, table_entry->physical_y, table_entry->blit);
+		if (clip_native) SDL_SetClipRect(current_target_surface, &saved_clip);
+	} else {
+		draw_image(image, mask, table_entry->xh * 8 + table_entry->xl, table_entry->y, table_entry->blit);
+	}
 }
 
 
@@ -963,6 +1942,7 @@ SDL_Surface* hflip(SDL_Surface* input) {
 	// The simplest way to create a surface with same format as input:
 	SDL_Surface* output = SDL_ConvertSurface(input, input->format, 0);
 	SDL_SetSurfacePalette(output, input->format->palette);
+	output->userdata = input->userdata; // preserve native-resolution tag
 	// The copied image will be overwritten anyway.
 	if (output == NULL) {
 		sdlperror("hflip: SDL_ConvertSurface");
@@ -987,6 +1967,43 @@ SDL_Surface* hflip(SDL_Surface* input) {
 	return output;
 }
 
+/* v11.16: Native climb masks 222..224 end one physical column before the
+ * DOS-positioned body's outline. Restore that column from the actual floor
+ * top, in the same MID pass as the mask. Copying the registered floor pixels
+ * preserves its texture; moving the actor or stretching the mask would not.
+ * v11.17 adds mask 221's tail below the elbow and mask 227's shoe-outline dot.
+ * Keep the repair limited to these cutouts and retain the current viewport. */
+static void mac_draw_climb_mask_edge(const midtable_type* item, image_type* mask) {
+	if (!uses_mac_native_full() || item->chtab_id != id_chtab_6_environment) return;
+	int first_row = 0;
+	switch (item->id) {
+		case 0x14: // res221, frame 138: retain the four rows touching the elbow.
+			first_row = 4;
+			break;
+		case 0x15: case 0x16: case 0x17: // res222..224, frames 139..141.
+		case 0x1A: // res227, frame 144: cover the last shoe-outline pixel.
+			break;
+		default:
+			return;
+	}
+	image_type* base = get_image(id_chtab_6_environment, 0x29 - 1);
+	short mx, my, bx, by;
+	if (base == NULL || !is_native_resolution_image(base) ||
+	    !get_native_image_origin(mask, &mx, &my) ||
+	    !get_native_image_origin(base, &bx, &by)) return;
+
+	SDL_Rect saved_clip, edge_clip;
+	SDL_Rect edge = {item->physical_x + mask->w, item->physical_y + first_row,
+	                 1, mask->h - first_row};
+	SDL_GetClipRect(current_target_surface, &saved_clip);
+	if (SDL_IntersectRect(&saved_clip, &edge, &edge_clip)) {
+		SDL_SetClipRect(current_target_surface, &edge_clip);
+		draw_native_image_physical_blit(base, item->physical_x + mx - bx,
+		                               item->physical_y + my - by, blitters_10h_transp);
+		SDL_SetClipRect(current_target_surface, &saved_clip);
+	}
+}
+
 
 // seg008:140C
 void draw_mid(int index) {
@@ -997,6 +2014,11 @@ void draw_mid(int index) {
 	word need_free_image = 0;
 	word need_free_mask = 0;
 	midtable_type* midtable_entry = &midtable[index];
+	if (midtable_entry->use_physical == native_entry_fill) {
+		draw_native_rect_physical(midtable_entry->physical_x, midtable_entry->physical_y,
+		                          midtable_entry->physical_w, midtable_entry->physical_h, midtable_entry->fill_rgb);
+		return;
+	}
 	word image_id = midtable_entry->id;
 	word chtab_id = midtable_entry->chtab_id;
 	image_type* image = mask = get_image(chtab_id, image_id);
@@ -1013,30 +2035,100 @@ void draw_mid(int index) {
 		blit &= 0x7F;
 	}
 
+	/* v7 actor anchor: y in the midtable is a top-left coordinate derived from
+	 * the old DOS bottom-alignment rule. Reconstruct that original logical
+	 * bottom/anchor before replacing the image placement with SHPD origins. */
+	const int native_actor = mac_native_actor_chtab((short)chtab_id) &&
+	                         is_native_resolution_image(image);
+	const int actor_anchor_y = ypos + logical_image_height(image) - 1;
+	short native_ox = 0, native_oy = 0;
+	const bool actor_has_origin = native_actor &&
+	                              get_native_image_origin(image, &native_ox, &native_oy);
+
+	if (midtable_entry->use_physical && is_native_resolution_image(image) && !blit_flip) {
+		if (midtable_entry->peel) {
+			const int physical_x = midtable_entry->physical_x;
+			const int physical_y = midtable_entry->physical_y;
+			const int left = physical_x >= 0 ? physical_x / 2 : -((-physical_x + 1) / 2);
+			const int top = physical_y >= 0 ? physical_y / 2 : -((-physical_y + 1) / 2);
+			const int right = (physical_x + image->w + 1) / 2;
+			const int bottom = (physical_y + image->h + 1) / 2;
+			add_peel(round_xpos_to_byte(left, 0), round_xpos_to_byte(right, 1), top, bottom - top);
+		}
+		draw_native_image_physical_blit(image, midtable_entry->physical_x, midtable_entry->physical_y, blit);
+		mac_draw_climb_mask_edge(midtable_entry, image);
+		return;
+	}
+
 	if (chtab_flip_clip[chtab_id]) {
-		set_clip_rect(&midtable_entry->clip);
+		/* Gameplay uses 192 logical rows above the HUD. Cutscenes own all 200. */
+		rect_type effective_clip = midtable_entry->clip;
+		if (uses_mac_native_full()) {
+			if (effective_clip.top < rect_top.top) effective_clip.top = rect_top.top;
+			if (effective_clip.left < rect_top.left) effective_clip.left = rect_top.left;
+			int bottom = is_cutscene ? screen_rect.bottom : rect_top.bottom;
+			if (effective_clip.bottom > bottom) effective_clip.bottom = bottom;
+			if (effective_clip.right > rect_top.right) effective_clip.right = rect_top.right;
+		}
+		set_clip_rect(&effective_clip);
 		if (chtab_id != id_chtab_0_sword) {
 			xpos = calc_screen_x_coord(xpos);
 		}
 	}
+
+	/* At this point xpos is the same logical horizontal anchor used by the DOS
+	 * actor path. Preserve it before the legacy flip code subtracts image width. */
+	const int actor_anchor_x = xpos;
 	if (blit_flip) {
-		xpos -= image->w/*width*/;
-		// for this version:
+		xpos -= logical_image_width(image);
 		need_free_image = 1;
 		image = hflip(image);
 	}
 
-	if (midtable_entry->peel) {
-		add_peel(round_xpos_to_byte(xpos, 0), round_xpos_to_byte(image->w/*width*/ + xpos, 1), ypos, image->h/*height*/);
+	if (native_actor && actor_has_origin) {
+		/* The SHPD origin is measured in physical Macintosh pixels. When an actor
+		 * is mirrored, mirror the origin around the image as well; otherwise the
+		 * anchor would jump by the sprite width when the Prince turns around. */
+		int ox = native_ox;
+		if (blit_flip) ox = image->w - 1 - native_ox;
+		const int physical_x = actor_anchor_x * 2 - ox;
+		int physical_y = actor_anchor_y * 2 - native_oy;
+		/* v11.15: The supplied KID553 Mac reference places this pose about
+		 * six native pixels above the current DOS-derived body anchor.
+		 * Align the post-row-change climb phase (141..144, KID552..555,
+		 * image indices 151..154) with the native floor-top baseline using
+		 * the same three-logical-pixel bridge as the masks. Without it the
+		 * trousers enter the top plane and the foot can emerge below the
+		 * front lip. Keep this render-
+		 * only correction out of Char/Kid, clipping and collision coordinates.
+		 * Earlier hanging poses and the standing/crouching poses keep their
+		 * existing anchors. Applying it by body resource also covers mirroring. */
+		if (chtab_id == id_chtab_2_kid && image_id >= 151 && image_id <= 154) {
+			physical_y += (1 + MAC_FLOOR_TOP_ANCHOR) * 2;
+		}
+
+		if (midtable_entry->peel) {
+			const int left = physical_x >= 0 ? physical_x / 2 : -((-physical_x + 1) / 2);
+			const int top = physical_y >= 0 ? physical_y / 2 : -((-physical_y + 1) / 2);
+			const int right = (physical_x + image->w + 1) / 2;
+			const int bottom = (physical_y + image->h + 1) / 2;
+			add_peel(round_xpos_to_byte(left, 0), round_xpos_to_byte(right, 1), top, bottom - top);
+		}
+		draw_native_image_physical_blit(image, physical_x, physical_y, blit);
+	} else {
+		if (midtable_entry->peel) {
+			add_peel(round_xpos_to_byte(xpos, 0), round_xpos_to_byte(logical_image_width(image) + xpos, 1), ypos, logical_image_height(image));
+		}
+		draw_image(image, mask, xpos, ypos, blit);
 	}
-	//printf("Midtable: drawing (chtab %d, image %d) at (x=%d, y=%d)\n",chtab_id,image_id,xpos,ypos); // debug
-	draw_image(image, mask, xpos, ypos, blit);
 
 	if (chtab_flip_clip[chtab_id]) {
 		reset_clip_rect();
+		/* draw_tables() maintains a gameplay-area clip in native-full mode; an
+		 * actor-specific clip temporarily replaces it, so restore it here. */
+		if (uses_mac_native_full()) set_clip_rect(is_cutscene ? &screen_rect : &rect_top);
 	}
 	if (need_free_image) {
-		//free(image);
 		SDL_FreeSurface(image);
 	}
 	if (need_free_mask) {
@@ -1069,9 +2161,9 @@ void draw_image(image_type* image,image_type* mask,int xpos,int ypos,int blit) {
 	}
 	if (need_drects) {
 		rect.left = rect.right = xpos;
-		rect.right += image->w/*width*/;
+		rect.right += logical_image_width(image);
 		rect.top = rect.bottom = ypos;
-		rect.bottom += image->h/*height*/;
+		rect.bottom += logical_image_height(image);
 		add_drect(&rect);
 	}
 }
@@ -1327,11 +2419,49 @@ void draw_moving() {
 }
 
 // seg008:1B06
+static void mac_expand_background_redraws(void) {
+	if (!uses_mac_native_full()) return;
+	/* The wall-side stripe starts 24 logical pixels into its cell and is
+	 * 32 pixels wide. Its last 24 pixels share the following cell, whose
+	 * decoration is drawn later. Refresh both in the original BACK order:
+	 * either a side redraw can overwrite that decoration, or a wipe in the
+	 * following cell can erase the stripe. FORE/actor-only requests stay local. */
+	for (int col = 0; col < 9; ++col) {
+		byte left, modifier, tile, unused;
+		get_tile_to_draw(drawn_room, col - 1, drawn_row, &left, &modifier, tiles_20_wall);
+		get_tile_to_draw(drawn_room, col, drawn_row, &tile, &unused, tiles_20_wall);
+		int pos = tbl_line[drawn_row] + col;
+		if (mac_is_palace() && left == tiles_20_wall && !(modifier & 0x80) && tile != tiles_20_wall &&
+		    (wipe_frames[pos] || redraw_frames_full[pos] || redraw_frames_anim[pos] ||
+		     wipe_frames[pos + 1] || redraw_frames_full[pos + 1] || redraw_frames_anim[pos + 1])) {
+			redraw_frames_full[pos] = MAX(redraw_frames_full[pos], 1);
+			redraw_frames_full[pos + 1] = MAX(redraw_frames_full[pos + 1], 1);
+		}
+		/* The native floor sword and skeleton also reach one physical column
+		 * into the next cell. Restore its later-drawn floor/overhang afterward. */
+		if ((tile == tiles_22_sword || tile == tiles_21_skeleton) &&
+		    (wipe_frames[pos] || redraw_frames_full[pos] || redraw_frames_anim[pos]))
+			redraw_frames_full[pos + 1] = MAX(redraw_frames_full[pos + 1], 1);
+		/* Palace exit-left res237 has SHPD origin X=1. Its next-cell right
+		 * piece reaches one physical column backwards into this cell. A torch
+		 * refresh here can repaint that border; restore the later-drawn piece.
+		 * Resolve native metadata rather than shifting or clipping the art. */
+		if (tile == tiles_16_level_door_left &&
+		    (wipe_frames[pos] || redraw_frames_full[pos] || redraw_frames_anim[pos])) {
+			image_type* edge = get_image(id_chtab_6_environment, tile_table[tile].right_id - 1);
+			short ox, oy;
+			if (edge && get_native_image_origin(edge, &ox, &oy) && ox > 0)
+				redraw_frames_full[pos + 1] = MAX(redraw_frames_full[pos + 1], 1);
+		}
+	}
+}
+
 void redraw_needed_tiles() {
 	load_leftroom();
 	draw_objtable_items_at_tile(30);
 	for (drawn_row = 3; drawn_row--; ) {
 		load_rowbelow();
+		mac_expand_background_redraws();
 		draw_bottom_y = 63 * drawn_row + 65;
 		draw_main_y = draw_bottom_y - 3;
 		for (drawn_col = 0; drawn_col < 10; ++drawn_col) {
@@ -1358,13 +2488,29 @@ void redraw_needed_tiles() {
 
 // seg008:1BCB
 void draw_tile_wipe(byte height) {
-	add_wipetable(0, draw_xh*8, draw_bottom_y, height, 4*8, 0);
+	short wipe_bottom = draw_bottom_y;
+	if (uses_mac_native_full() && height > 3) {
+		/* v11.8: The DOS wipe reaches draw_bottom_y, but the Macintosh floor
+		 * front (e.g. 0x2B/0x24/0x60) ends at draw_main_y (physical row 2*M+1).
+		 * The extra 3 logical rows (6 native rows) lie on the top of the wall /
+		 * tile in the row below, which is NOT redrawn when only this tile (and
+		 * its right neighbour) is refreshed. Wiping them left a permanent black
+		 * strip under every pressure plate that changed state. Keep the wipe's
+		 * top edge unchanged and stop it at the bottom of the Mac front. */
+		byte trim = (byte)(draw_bottom_y - draw_main_y);
+		wipe_bottom = draw_main_y;
+		height = (height > trim) ? (byte)(height - trim) : 0;
+	}
+	add_wipetable(0, draw_xh*8, wipe_bottom, height, 4*8, 0);
 }
 
 // seg008:1BEB
 void draw_tables() {
 	drects_count = 0;
 	current_target_surface = offscreen_surface;
+	/* Native origins can extend beyond a tile. Gameplay stops above the HUD;
+	 * cutscenes use the full 320x200 logical / 640x400 physical screen. */
+	if (uses_mac_native_full()) set_clip_rect(is_cutscene ? &screen_rect : &rect_top);
 	if (is_blind_mode) {
 		draw_rect(&rect_top, color_0_black);
 	}
@@ -1378,6 +2524,7 @@ void draw_tables() {
 	draw_table(3); // midtable
 	draw_wipes(1);
 	draw_table(1); // foretable
+	if (uses_mac_native_full()) reset_clip_rect();
 	current_target_surface = onscreen_surface_;
 	show_copyprot(1);
 }
@@ -1452,6 +2599,80 @@ void get_room_address(int room) {
 
 // data:286A
 const word floor_left_overlay[] = {32, 151, 151, 150, 150, 151, 32, 32};
+
+/* v11.9: The legacy climb-up path does more than redraw the environment.
+ * Frames 137..144 put a small floor-left wedge and the floor front into the
+ * MID table so those pixels occlude the Prince while he pulls himself up.
+ *
+ * mac_native_full previously collapsed redraw_frames_floor_overlay into a
+ * normal mac_draw_tile_exact() call. That repainted the room, but it lost the
+ * midtable occluder completely, allowing the actor to show through floor /
+ * pillar edges during the climb. Keep gameplay and actor placement untouched;
+ * restore only the missing layer semantics here.
+ */
+static void mac_draw_floor_overlay_exact(void) {
+#ifdef FIX_BIGPILLAR_CLIMB
+	if (tile_left != tiles_0_empty &&
+	    (!fixes->fix_bigpillar_climb || tile_left != tiles_9_bigpillar_top)) {
+		return;
+	}
+#else
+	if (tile_left != tiles_0_empty) return;
+#endif
+
+	if (curr_tile != tiles_1_floor &&
+	    curr_tile != tiles_3_pillar &&
+	    curr_tile != tiles_5_stuck &&
+	    curr_tile != tiles_19_torch) {
+		return;
+	}
+
+	if (Kid.frame < frame_137_climbing_3 || Kid.frame > frame_144_climbing_10) {
+		return;
+	}
+
+	/* v11.14: Macintosh has eight native, frame-specific climb occluders in
+	 * VDUNGEON/VPALACE resources 220..227 (chtab IDs 0x14..0x1B), one for
+	 * each frame 137..144.  The legacy floor_left_overlay[] table points to
+	 * DOS resources 232/350/351; using those in native-full produced the
+	 * coarse grey wedge seen across the Prince's trousers during climb-down.
+	 * Use the real Mac SHPD pieces and their origins instead. */
+	static const byte mac_floor_left_overlay[8] = {
+		0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B
+	};
+	const int overlay_id = mac_floor_left_overlay[Kid.frame - frame_137_climbing_3];
+	/* v11.15: These masks are literal cutouts of the native floor TOP, so
+	 * their anchor must be the same as its base component. The DOS overlay
+	 * baseline (draw_main_y) placed them 3 logical / 6 native pixels too low,
+	 * leaving the Prince visible inside the sloping surface. A stuck plate
+	 * lowers both the base and its mask by one logical pixel. */
+	const int overlay_anchor_y = draw_main_y + 1 + MAC_FLOOR_TOP_ANCHOR +
+	                             (curr_tile == tiles_5_stuck);
+	mac_debug_floor_piece("climb-overlay", curr_tile, curr_modifier, overlay_id,
+	                      draw_xh * 8, overlay_anchor_y,
+	                      get_image(id_chtab_6_environment, overlay_id - 1));
+	mac_add_mid_anchor_exact(id_chtab_6_environment, overlay_id,
+	                         draw_xh * 8,
+	                         overlay_anchor_y,
+	                         blitters_10h_transp, 0);
+
+	/* Duplicate only the floor/front component into the MID table, just as
+	 * draw_floor_overlay() does in the legacy compositor. Use the v11 state
+	 * table so a depressed plate gets 0x24 while ordinary floor/pillar/torch
+	 * gets the normal 0x2B front, all at the SHPD-aware Mac anchor. */
+	int front_id = 0x2B;
+	int front_anchor_y = MAC_FLOOR_BOTTOM_ANCHOR;
+	mac_floor_state_type state;
+	if (mac_get_floor_state(curr_tile, curr_modifier, &state) && state.front_id) {
+		front_id = state.front_id;
+		front_anchor_y = state.front_anchor_y;
+	}
+
+	mac_add_mid_anchor_exact(id_chtab_6_environment, front_id,
+	                         draw_xh * 8,
+	                         draw_main_y + 1 + front_anchor_y,
+	                         blitters_10h_transp, 0);
+}
 
 // seg008:1E3A
 void draw_floor_overlay() {
@@ -1598,9 +2819,35 @@ void draw_objtable_item(int index) {
 		break;
 		case 0x80: // loose floor
 			obj_direction = dir_FF_left;
-			add_midtable(obj_chtab, loose_fram_left[obj_id], obj_xh, obj_xl, obj_y - 3, blitters_10h_transp, 1);
-			add_midtable(obj_chtab, loose_fram_bottom[obj_id], obj_xh, obj_xl, obj_y, 0, 1);
-			add_midtable(obj_chtab, loose_fram_right[obj_id], obj_x + 4, obj_xl, obj_y - 1, blitters_10h_transp, 1);
+			if (uses_mac_native_full()) {
+				mac_floor_state_type state;
+				if (mac_get_floor_state(tiles_11_loose, obj_id, &state)) {
+					const int left_x = obj_xh * 8 + obj_xl;
+					const int right_x = (obj_x + 4) * 8 + obj_xl;
+					/* curmob.y is the legacy floor-bottom baseline (65/128/191 at
+					 * rest). The static Mac compositor's logical anchor origin is two
+					 * pixels above that baseline: draw_main_y + 1 == draw_bottom_y - 2.
+					 * Reusing that origin makes the last shaking frame and first falling
+					 * frame land on the same native pixels instead of jumping 3px down. */
+					const int anchor_origin_y = obj_y - 2;
+					const int base_y = anchor_origin_y + state.base_anchor_y;
+					const int front_y = anchor_origin_y + state.front_anchor_y;
+					const int right_y = anchor_origin_y + state.right_anchor_y;
+					mac_debug_floor_piece("fall-base", tiles_11_loose, obj_id, state.base_id, left_x, base_y,
+						get_image(obj_chtab, state.base_id - 1));
+					mac_add_mid_anchor_exact(obj_chtab, state.base_id, left_x, base_y, blitters_10h_transp, 1);
+					mac_debug_floor_piece("fall-front", tiles_11_loose, obj_id, state.front_id, left_x, front_y,
+						get_image(obj_chtab, state.front_id - 1));
+					mac_add_mid_anchor_exact(obj_chtab, state.front_id, left_x, front_y, 0, 1);
+					mac_debug_floor_piece("fall-right", tiles_11_loose, obj_id, state.right_id, right_x, right_y,
+						get_image(obj_chtab, state.right_id - 1));
+					mac_add_mid_anchor_exact(obj_chtab, state.right_id, right_x, right_y, blitters_10h_transp, 1);
+				}
+			} else {
+				add_midtable(obj_chtab, loose_fram_left[obj_id], obj_xh, obj_xl, obj_y - 3, blitters_10h_transp, 1);
+				add_midtable(obj_chtab, loose_fram_bottom[obj_id], obj_xh, obj_xl, obj_y, 0, 1);
+				add_midtable(obj_chtab, loose_fram_right[obj_id], obj_x + 4, obj_xl, obj_y - 1, blitters_10h_transp, 1);
+			}
 		break;
 	}
 }
@@ -1941,7 +3188,12 @@ void wall_pattern(int which_part,int which_table) {
 	random_seed = drawn_room + tbl_line[drawn_row] + drawn_col;
 	prandom(1); // fetch a random number and discard it
 	word is_dungeon = (custom->tbl_level_type[current_level] < DESIGN_PALACE) || custom->enable_wda_in_palace;
-	if ( (!is_dungeon) && (graphics_mode== GRAPHICS_VGA) ) {
+	if ( (!is_dungeon) && (graphics_mode== GRAPHICS_VGA) &&
+		 strcasecmp(graphics_pack_name, "dos") == 0 ) {
+		// The DOS palace wall set uses small divider decals here while the wall
+		// faces themselves are generated procedurally below. Alternate graphics
+		// packs (SNES/Mac) store complete wall-face stacks in RSET_WALL, so they
+		// must use the generic WDA path in the else branch instead.
 		// I haven't traced the palace WDA
 		//[...]
 		if (which_part) {

@@ -51,6 +51,14 @@ hof_type hof[MAX_HOF_COUNT];
 
 #define N_STARS 6
 
+static void restore_princess_stars(void);
+
+static int mac_native_princess_room(void) {
+	chtab_type* room = chtab_addrs[id_chtab_8_princessroom];
+	return uses_mac_native_full() && room &&
+	       room->n_images == 15 && is_native_resolution_image(room->images[0]);
+}
+
 // data:0D92
 rect_type hof_rects[MAX_HOF_COUNT] = {
 { 84,   72,   96,  248},
@@ -157,6 +165,14 @@ void play_opp_seq() {
 // seg001:0156
 void draw_princess_room_bg() {
 	memset(table_counts, 0, sizeof(table_counts));
+	const int native_room = mac_native_princess_room();
+	if (native_room) {
+		/* Native flames/sand are transparent, unlike the DOS redraw patches.
+		 * Compose from the retained 640x400 room each frame to clear old poses.
+		 * Peels must not put the previous frame back over that background. */
+		free_peels();
+		add_backtable_physical(id_chtab_8_princessroom, 1, 0, 0, blitters_0_no_transp);
+	}
 	loadkid();
 	if (Char.frame) {
 		load_frame_to_obj();
@@ -169,11 +185,25 @@ void draw_princess_room_bg() {
 		obj_tilepos = 30;
 		add_objtable(0);
 	}
-	redraw_needed_tiles();
-	add_foretable(id_chtab_8_princessroom, 2 /*pillar piece*/, 30, 0, 167, blitters_10h_transp, 0);
+	if (native_room) {
+		draw_objtable_items_at_tile(30);
+		/* CODE 3:$1D30: the matching native pillar foot, not DOS res952.
+		 * SHPD 962 at anchor (240,167) registers with the baked right pillar. */
+		mac_add_fore_anchor_exact(id_chtab_8_princessroom, 2, 240, 167, blitters_10h_transp);
+	} else {
+		redraw_needed_tiles();
+		add_foretable(id_chtab_8_princessroom, 2 /*pillar piece*/, 30, 0, 167, blitters_10h_transp, 0);
+	}
 	princess_room_torch();
 	draw_hourglass();
 	draw_tables();
+	if (native_room) {
+		current_target_surface = offscreen_surface;
+		restore_princess_stars();
+		current_target_surface = onscreen_surface_;
+		rect_type dirty = screen_rect;
+		add_drect(&dirty);
+	}
 }
 
 // seg001:01E0
@@ -507,19 +537,40 @@ void princess_room_torch() {
 	for (short which = 2; which--; ) {
 		which_torch = !which_torch;
 		princess_torch_frame[which_torch] = get_torch_frame(princess_torch_frame[which_torch]);
-		add_backtable(id_chtab_1_flameswordpotion, princess_torch_frame[which_torch] + 1, princess_torch_pos_xh[which_torch], princess_torch_pos_xl[which_torch], 116, 0, 0);
+		if (mac_native_princess_room()) {
+			/* CODE 3:$2512 and DATA -$56E8: (xh,xl)=(9,6)/(36,2),
+			 * y=121. Use PV 973..975 and their (0,29) SHPD origin.
+			 * Keep SDLPoP's existing frame advance and RNG calls. */
+			static const short anchor_x[] = {78, 290};
+			int id = 13 + princess_torch_frame[which_torch] % 3;
+			image_type* image = get_image(id_chtab_8_princessroom, id - 1);
+			short ox = 0, oy = 0;
+			get_native_image_origin(image, &ox, &oy);
+			add_backtable_physical(id_chtab_8_princessroom, id,
+				anchor_x[which_torch] * 2 - ox, 121 * 2 - oy, blitters_10h_transp);
+		} else {
+			add_backtable(id_chtab_1_flameswordpotion, princess_torch_frame[which_torch] + 1,
+				princess_torch_pos_xh[which_torch], princess_torch_pos_xl[which_torch], 116, 0, 0);
+		}
 	}
 }
 
 // seg001:0863
 void draw_hourglass() {
+	const int native_room = mac_native_princess_room();
 	if (hourglass_sandflow >= 0) {
 		hourglass_sandflow = (hourglass_sandflow + 1) % 3;
 		if (hourglass_state >= 7) return;
-		add_foretable(id_chtab_8_princessroom, hourglass_sandflow + 10, 20, 0, 164, blitters_10h_transp, 0);
+		if (native_room)
+			mac_add_fore_anchor_exact(id_chtab_8_princessroom, hourglass_sandflow + 10, 160, 164, blitters_10h_transp);
+		else
+			add_foretable(id_chtab_8_princessroom, hourglass_sandflow + 10, 20, 0, 164, blitters_10h_transp, 0);
 	}
 	if (hourglass_state) {
-		add_midtable(id_chtab_8_princessroom, hourglass_state + 2, 19, 0, 168, blitters_10h_transp, 1);
+		if (native_room)
+			mac_add_mid_anchor_exact(id_chtab_8_princessroom, hourglass_state + 2, 152, 168, blitters_10h_transp, 0);
+		else
+			add_midtable(id_chtab_8_princessroom, hourglass_state + 2, 19, 0, 168, blitters_10h_transp, 1);
 	}
 }
 
@@ -661,15 +712,27 @@ void load_intro(int which_imgs,cutscene_ptr_type func,int free_sounds) {
 	}
 	free_all_chtabs_from(id_chtab_3_princessinstory);
 	load_chtab_from_file(id_chtab_8_princessroom, 950, "PV.DAT", 1<<13);
-	load_chtab_from_file(id_chtab_9_princessbed, 980, "PV.DAT", 1<<14);
+	const int native_room = mac_native_princess_room();
+	const int restore_room_buffer = native_room && offscreen_surface &&
+	                                offscreen_surface->h == rect_top.bottom * get_render_scale();
+	if (native_room && (!offscreen_surface || offscreen_surface->h != get_render_height())) {
+		/* Between levels the room buffer is only 640x384; cutscenes own all
+		 * 640x400 pixels. Restore a borrowed gameplay buffer on return. */
+		if (offscreen_surface) free_surface(offscreen_surface);
+		offscreen_surface = make_offscreen_buffer(&screen_rect);
+	}
+	if (!native_room) load_chtab_from_file(id_chtab_9_princessbed, 980, "PV.DAT", 1<<14);
 	current_target_surface = offscreen_surface;
+	if (native_room) reset_clip_rect();
 	method_6_blit_img_to_scr(get_image(id_chtab_8_princessroom, 0), 0, 0, 0);
-	method_6_blit_img_to_scr(get_image(id_chtab_9_princessbed, 0), 0, 142, blitters_2_or);
+	if (!native_room) method_6_blit_img_to_scr(get_image(id_chtab_9_princessbed, 0), 0, 142, blitters_2_or);
 
 	// Free the images that are not needed anymore.
 	free_all_chtabs_from(id_chtab_9_princessbed);
-	SDL_FreeSurface(get_image(id_chtab_8_princessroom, 0));
-	if (NULL != chtab_addrs[id_chtab_8_princessroom]) chtab_addrs[id_chtab_8_princessroom]->images[0] = NULL;
+	if (!native_room) {
+		SDL_FreeSurface(get_image(id_chtab_8_princessroom, 0));
+		if (NULL != chtab_addrs[id_chtab_8_princessroom]) chtab_addrs[id_chtab_8_princessroom]->images[0] = NULL;
+	}
 
 	load_chtab_from_file(id_chtab_3_princessinstory, 800, "PV.DAT", 1<<9);
 	load_chtab_from_file(id_chtab_4_jaffarinstory_princessincutscenes,
@@ -690,6 +753,10 @@ void load_intro(int which_imgs,cutscene_ptr_type func,int free_sounds) {
 	is_cutscene = 0;
 	free_all_chtabs_from(3);
 	draw_rect(&screen_rect, color_0_black);
+	if (restore_room_buffer) {
+		free_surface(offscreen_surface);
+		offscreen_surface = make_offscreen_buffer(&rect_top);
+	}
 }
 
 typedef struct star_type {
@@ -708,6 +775,14 @@ star_type stars[N_STARS] = {
 #define N_STAR_COLORS 5
 // data:0DE6
 const byte star_colors[N_STAR_COLORS] = {8, 7, 15, 15, 7};
+
+/* Redraw the selected star colours without advancing their animation/RNG. */
+static void restore_princess_stars(void) {
+	for (int i = 0; i < N_STARS; ++i) {
+		rect_type rect = {stars[i].y, stars[i].x, stars[i].y + 1, stars[i].x + 1};
+		draw_rect(&rect, star_colors[stars[i].color]);
+	}
+}
 
 // seg001:0E1C
 void draw_star(int which_star,int mark_dirty) {

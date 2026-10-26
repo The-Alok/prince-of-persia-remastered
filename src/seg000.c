@@ -19,6 +19,7 @@ The authors of this program may be contacted at https://forum.princed.org
 */
 
 #include "common.h"
+#include "pak.h"
 #include <setjmp.h>
 #define _USE_MATH_DEFINES
 #include <math.h>
@@ -37,7 +38,7 @@ void fix_sound_priorities(void);
 // seg000:0000
 void pop_main() {
 	if (check_param("--version") || check_param("-v")) {
-		printf ("SDLPoP v%s\n", SDLPOP_VERSION);
+		printf("%s v%s\nBased on SDLPoP v%s\n", REMASTERED_NAME, REMASTERED_VERSION, SDLPOP_VERSION);
 		exit(0);
 	}
 
@@ -63,6 +64,7 @@ void pop_main() {
 
 	load_global_options();
 	check_mod_param();
+	scan_available_paks(); // find the graphics packs (data/res_*.pak) and pick the one from graphics_pack in the ini
 #ifdef USE_MENU
 	load_ingame_settings();
 #endif
@@ -106,6 +108,7 @@ void pop_main() {
 	parse_cmdline_sound();
 
 	show_loading();
+	init_pak(); // load the selected graphics pack
 	set_joy_mode();
 	cheats_enabled = check_param("megahit") != NULL;
 #ifdef USE_DEBUG_CHEATS
@@ -914,11 +917,12 @@ void play_frame() {
 
 // seg000:09B6
 void draw_game_frame() {
-	if (need_full_redraw) {
+	if (need_full_redraw && !different_room) {
 		redraw_screen(0);
 		need_full_redraw = 0;
 	} else {
 		if (different_room) {
+			need_full_redraw = 0;
 			drawn_room = next_room;
 			if (custom->tbl_level_type[current_level]) {
 				gen_palace_wall_colors();
@@ -1397,19 +1401,45 @@ void read_joyst_control() {
 
 // seg000:10EA
 void draw_kid_hp(short curr_hp,short max_hp) {
+	const int mac_native =
+		strcasecmp(graphics_pack_name, "mac_native") == 0 ||
+		uses_mac_native_full();
+
+	/* Macintosh COLOR stores full/empty HUD flasks at KID 617/618.
+	 * get_image() takes a ZERO-based table index: resource617 is slot216.
+	 * The previous extra +1 selected empty618 for full and actor619 for empty.
+	 * Keep the stable graphics pack's old path outside native-full.
+	 *
+	 * Native flasks are 16x15 physical pixels, so an 8-logical-pixel step is
+	 * exactly 16 pixels at 640x400. y=192 maps to physical y=384 and keeps
+	 * the full 15-pixel icon inside the framebuffer. */
+	const int native_full = uses_mac_native_full();
+	const short empty_image = native_full ? 217 : mac_native ? 218 : 217;
+	const short full_image  = native_full ? 216 : mac_native ? 217 : 216;
+	const short hp_step     = mac_native ? 8 : 7;
+	const short hp_y        = mac_native ? 192 : 194;
+
 	for (short drawn_hp_index = curr_hp; drawn_hp_index < max_hp; ++drawn_hp_index) {
 		// empty HP
-		method_6_blit_img_to_scr(get_image(id_chtab_2_kid, 217), drawn_hp_index * 7, 194, blitters_0_no_transp);
+		method_6_blit_img_to_scr(get_image(id_chtab_2_kid, empty_image), drawn_hp_index * hp_step, hp_y, blitters_0_no_transp);
 	}
 	for (short drawn_hp_index = 0; drawn_hp_index < curr_hp; ++drawn_hp_index) {
 		// full HP
-		method_6_blit_img_to_scr(get_image(id_chtab_2_kid, 216), drawn_hp_index * 7, 194, blitters_0_no_transp);
+		method_6_blit_img_to_scr(get_image(id_chtab_2_kid, full_image), drawn_hp_index * hp_step, hp_y, blitters_0_no_transp);
 	}
 }
 
 // seg000:1159
 void draw_guard_hp(short curr_hp,short max_hp) {
 	if (chtab_addrs[id_chtab_5_guard] == NULL) return;
+	const int mac_native =
+		strcasecmp(graphics_pack_name, "mac_native") == 0 ||
+		uses_mac_native_full();
+	const short hp_step = mac_native ? 8 : 7;
+	const short hp_y = mac_native ? 192 : 194;
+	/* 640-wide framebuffer: x=312 logical -> x=624 physical, leaving exactly
+	 * 16 pixels for the native guard flask. DOS keeps its historical x=314. */
+	const short hp_right = mac_native ? 312 : 314;
 	short guard_charid = Guard.charid;
 	if (guard_charid != charid_4_skeleton &&
 		guard_charid != charid_24_mouse &&
@@ -1417,10 +1447,10 @@ void draw_guard_hp(short curr_hp,short max_hp) {
 		(guard_charid != charid_1_shadow || current_level == 12)
 	) {
 		for (short drawn_hp_index = curr_hp; drawn_hp_index < max_hp; ++drawn_hp_index) {
-			method_6_blit_img_to_scr(chtab_addrs[id_chtab_5_guard]->images[0], 314 - drawn_hp_index * 7, 194, blitters_9_black);
+			method_6_blit_img_to_scr(chtab_addrs[id_chtab_5_guard]->images[0], hp_right - drawn_hp_index * hp_step, hp_y, blitters_9_black);
 		}
 		for (short drawn_hp_index = 0; drawn_hp_index < curr_hp; ++drawn_hp_index) {
-			method_6_blit_img_to_scr(chtab_addrs[id_chtab_5_guard]->images[0], 314 - drawn_hp_index * 7, 194, blitters_0_no_transp);
+			method_6_blit_img_to_scr(chtab_addrs[id_chtab_5_guard]->images[0], hp_right - drawn_hp_index * hp_step, hp_y, blitters_0_no_transp);
 		}
 	}
 }
@@ -2095,6 +2125,10 @@ void release_title_images() {
 	}
 }
 
+/* Native SHPD 40's frame has a transparent centre. Keep the story underlay
+ * separate from its palette so TITLE_MAIN still has its black backdrop. */
+static Uint32 mac_story_background_rgb = 0x100060;
+
 // seg000:1C3A
 void draw_full_image(enum full_image_id id) {
 	image_type* decoded_image;
@@ -2106,6 +2140,58 @@ void draw_full_image(enum full_image_id id) {
 	int blit = full_image[id].blitter;
 	int xpos = full_image[id].xpos;
 	int ypos = full_image[id].ypos;
+	if (uses_mac_native_full() &&
+	    id == STORY_FRAME && is_native_resolution_image(decoded_image)) {
+		/* CODE 3:$0ED6 fills before drawing SHPD 40's transparent frame.
+		 * Intro uses CLUT 23 (#100060); ending uses CLUT 16 (#800000).
+		 * These are physical pixels; story text retains its logical anchor. */
+		draw_native_rect_physical(0, 0, decoded_image->w, decoded_image->h, mac_story_background_rgb);
+		draw_native_image_physical(decoded_image, xpos * 2, ypos * 2);
+		return;
+	}
+	if (uses_mac_native_full() &&
+	    id >= STORY_ABSENCE && id <= STORY_CREDITS && is_native_resolution_image(decoded_image)) {
+		/* CODE 3:$0D42/$0DB2/$2644/$0E3E use these story-card anchors.
+		 * SHPD carries the text inset (-23,-1; credits -18,2). Retain the
+		 * original white art and exact native position, rather than DOS mono. */
+		short ox = 0, oy = 0;
+		if (get_native_image_origin(decoded_image, &ox, &oy)) {
+			draw_native_image_physical(decoded_image, xpos * 2 - ox, ypos * 2 - oy);
+			return;
+		}
+	}
+	const int mac_native =
+		strcasecmp(graphics_pack_name, "mac_native") == 0 ||
+		uses_mac_native_full();
+
+	/* v9 Macintosh title compositor.
+	 *
+	 * TITLE40 image 0 is the complete 640x400 ornamental border.  TITLE50
+	 * image 0 is a 574x352 transparent palace illustration.  Earlier native
+	 * builds drew TITLE50 with the DOS opaque blitter; its transparent/black
+	 * top area consequently erased the ornamental top border.  Compose the two
+	 * layers at native resolution instead.  The 574px illustration is centered
+	 * exactly at x=33, avoiding the old 16-logical-pixel (32px) rounding. */
+	if (mac_native && id == TITLE_MAIN && is_native_resolution_image(decoded_image) &&
+	    chtab_title40 != NULL && chtab_title40->images[0] != NULL) {
+		method_6_blit_img_to_scr(chtab_title40->images[0], 0, 0, blitters_0_no_transp);
+		draw_native_image_physical(decoded_image,
+			(get_render_width() - decoded_image->w) / 2, 0);
+		return;
+	}
+
+	/* Native TITLE50 overlays were still positioned with the original DOS
+	 * logical x coordinates.  Their Macintosh resources have different widths,
+	 * so that visibly shifts Broderbund/presents, the game title, logo and
+	 * copyright line left.  Center the actual native bitmap in 640px physical
+	 * space.  Keep the original vertical timing/positions unchanged. */
+	if (mac_native && is_native_resolution_image(decoded_image) &&
+	    (id == TITLE_PRESENTS || id == TITLE_GAME || id == TITLE_POP ||
+	     id == TITLE_MECHNER)) {
+		draw_native_image_physical(decoded_image,
+			(get_render_width() - decoded_image->w) / 2, ypos * get_render_scale());
+		return;
+	}
 
 	switch (blit) {
 	case blitters_white:
@@ -2126,7 +2212,15 @@ void draw_full_image(enum full_image_id id) {
 		}
 		break;
 	case blitters_0_no_transp:
-		method_6_blit_img_to_scr(decoded_image, xpos, ypos, blit);
+		/* Mac TITLE resources 52/53/55 (PRESENTS/GAME/MECHNER) are
+		 * transparent SHPD overlays.  The DOS title path marks them opaque,
+		 * which turns their transparent background into a dark rectangle. */
+		if (is_native_resolution_image(decoded_image) && mac_native &&
+		    (id == TITLE_PRESENTS || id == TITLE_GAME || id == TITLE_MECHNER)) {
+			draw_image_transp(decoded_image, decoded_image, xpos, ypos);
+		} else {
+			method_6_blit_img_to_scr(decoded_image, xpos, ypos, blit);
+		}
 		break;
 	}
 }
@@ -2295,6 +2389,7 @@ void free_optsnd_chtab() {
 
 // seg000:22C8
 void load_title_images(int bgcolor) {
+	mac_story_background_rgb = bgcolor ? 0x100060 : 0x800000;
 	dat_type* dathandle = open_dat("TITLE.DAT", 'G');
 	chtab_title40 = load_sprites_from_file(40, 1<<11, 1);
 	chtab_title50 = load_sprites_from_file(50, 1<<12, 1);
@@ -2410,20 +2505,20 @@ void show_quotes() {
 const rect_type splash_text_1_rect = {0, 0, 50, 320};
 const rect_type splash_text_2_rect = {50, 0, 200, 320};
 
-const char* splash_text_1 = "SDLPoP " SDLPOP_VERSION;
+const char* splash_text_1 = REMASTERED_NAME "\nv" REMASTERED_VERSION;
 const char* splash_text_2 =
-		"In-game, Esc opens a settings/quicksave menu.\n"
+		"Macintosh graphics at native 640x400.\n"
 		"\n"
+		"Esc - Settings and quicksave menu.\n"
+		"F6 / F9 - Quicksave / quickload.\n"
 #ifdef USE_REPLAY
-		"To record replays, press Ctrl+Tab in-game.\n"
-		"To view replays, press Tab on the title screen.\n"
-		"\n"
+		"Ctrl+Tab - Record a replay in-game.\n"
+		"Tab - View replays on the title screen.\n"
 #endif
-		"Edit SDLPoP.ini to customize SDLPoP.\n"
-		"Mods also work with SDLPoP.\n"
 		"\n"
-		"For more information, read README.md.\n"
-		"Questions? Visit https://forum.princed.org\n"
+		"Read README.md for this version.\n"
+		"\n"
+		"Built on SDLPoP " SDLPOP_VERSION ".\n"
 		"\n"
 		"Press any key to continue...";
 
@@ -2473,13 +2568,14 @@ const char* get_writable_file_path(char* custom_path_buffer, size_t max_len, con
 #if defined WIN32 || _WIN32 || WIN64 || _WIN64
 	const char* save_path = getenv("SDLPOP_SAVE_PATH");
 #else
-	char save_path[POP_MAX_PATH];
+	char save_path_storage[POP_MAX_PATH] = "";
+	const char* save_path = save_path_storage;
 	const char* custom_save_path = getenv("SDLPOP_SAVE_PATH");
 	const char* home_path = getenv("HOME");
 	if (custom_save_path != NULL && custom_save_path[0] != '\0')
-		snprintf_check(save_path, max_len, "%s", custom_save_path);
+		snprintf_check(save_path_storage, sizeof(save_path_storage), "%s", custom_save_path);
 	else if (home_path != NULL && home_path[0] != '\0')
-		snprintf_check(save_path, max_len, "%s/.%s", home_path, POP_DIR_NAME);
+		snprintf_check(save_path_storage, sizeof(save_path_storage), "%s/.%s", home_path, POP_DIR_NAME);
 #endif
 
 	if (save_path != NULL && save_path[0] != '\0') {

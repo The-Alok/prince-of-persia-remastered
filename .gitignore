@@ -13,6 +13,14 @@ QUICKSAVE.SAV
 mods/*/
 
 # Object files
+.build/
+dist/
+__pycache__/
+*.py[cod]
+tools/mac_reference/hfs-forks/
+tools/mac_reference/app-resources/
+tools/mac_reference/decoded/
+tools/mac_color_port/__pycache__/
 *.o
 *.ko
 *.obj

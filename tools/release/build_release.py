@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+"""Package Windows/Linux release downloads; source is provided at the matching Git tag."""
+import argparse
+import gzip
+import hashlib
+import io
+import json
+from pathlib import Path
+import platform
+import re
+import subprocess
+import tarfile
+import zipfile
+
+ROOT = Path(__file__).resolve().parents[2]
+VERSION = re.search(r'^#define REMASTERED_VERSION "([^"]+)"', (ROOT/'src/config.h').read_text(), re.M)[1]
+SOURCE_URL = f'https://github.com/The-Alok/prince-of-persia-remastered/tree/v{VERSION}'
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def command(*args):
+    return subprocess.check_output(args, cwd=ROOT, text=True, stderr=subprocess.STDOUT)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--platform', choices=['linux', 'windows'], default='linux')
+    parser.add_argument('--windows-runtime', type=Path, default=ROOT/'.build/windows/runtime')
+    parser.add_argument('--output', type=Path, default=ROOT/'dist')
+    args = parser.parse_args()
+    if not re.fullmatch(r'\d+\.\d+\.\d+', VERSION):
+        raise SystemExit('Expected a public semantic release version.')
+    for line in (ROOT/'MAC_NATIVE_SHA256SUMS.txt').read_text().splitlines():
+        expected, relative = line.split(maxsplit=1)
+        if digest((ROOT/relative).read_bytes()) != expected:
+            raise SystemExit(f'Native pack checksum failed: {relative}')
+    if 'graphics_pack = mac_native_full' not in (ROOT/'SDLPoP.ini').read_text():
+        raise SystemExit('Native FULL must be the startup default.')
+    contents = {}
+    executable_names = set()
+
+    def add(path, relative=None):
+        if path.is_file():
+            contents[relative or path.relative_to(ROOT).as_posix()] = path.read_bytes()
+
+    for name in ('SDLPoP.ini', 'COPYING', 'CREDITS.md', 'README.md', 'README.upstream.md', 'RELEASE_NOTES.md'):
+        add(ROOT/name)
+    for name in ('doc/images/welcome.png', 'doc/RELEASE_VALIDATION.md'):
+        add(ROOT/name)
+    for folder in ('data', 'mods', 'replays'):
+        for path in (ROOT/folder).rglob('*'):
+            if path.is_file() and path.suffix.lower() not in ('.sav', '.p1r', '.cfg'):
+                add(path)
+    metadata = {'version': VERSION, 'platform': f'{args.platform}-x86_64', 'source': SOURCE_URL,
+                'upstream': 'https://github.com/NagyD/SDLPoP',
+                'graphics_reference': 'https://github.com/chanunnaki/SDLPoP-PSP',
+                'live_full_game_and_steam_deck_tests': 'pending; see RELEASE_NOTES.md'}
+    if args.platform == 'linux':
+        if platform.system() != 'Linux' or platform.machine() != 'x86_64':
+            raise SystemExit('Linux x64 packaging requires a Linux x64 build host.')
+        if f'v{VERSION}' not in command(str(ROOT/'prince'), '--version'):
+            raise SystemExit('Rebuild prince with the current version before packaging.')
+        add(ROOT/'prince')
+        add(ROOT/'tools/release/launch.sh', 'launch.sh')
+        executable_names.update(('prince', 'launch.sh'))
+        dependencies = command('ldd', 'prince')
+        if 'not found' in dependencies:
+            raise SystemExit('A runtime library is missing.')
+        versions = sorted(set(re.findall(r'GLIBC_([0-9.]+)', command('readelf', '--version-info', 'prince'))),
+                          key=lambda value: tuple(map(int, value.split('.'))))
+        metadata.update(build_os=platform.freedesktop_os_release().get('PRETTY_NAME'),
+                        required_glibc_symbol_versions=versions,
+                        dynamic_dependencies=dependencies.splitlines(), bundled_sdl_libraries=False)
+    else:
+        runtime = args.windows_runtime.resolve()
+        binary = runtime/'prince.exe'
+        if not binary.exists() or binary.read_bytes()[:2] != b'MZ':
+            raise SystemExit('Build the Windows runtime first with build_windows.py.')
+        for path in runtime.rglob('*'):
+            if path.is_file():
+                relative = path.relative_to(runtime)
+                if path.name in ('prince.exe', 'BUILD_INFO_WINDOWS.json') or path.suffix.lower() == '.dll' or relative.parts[0] == 'licenses':
+                    add(path, relative.as_posix())
+        contents['launch.bat'] = b'@echo off\r\ncd /d "%~dp0"\r\nstart "" "%~dp0prince.exe" %*\r\n'
+        metadata.update(bundled_runtime='See BUILD_INFO_WINDOWS.json and licenses/', native_windows_playtest='pending')
+    contents['BUILD_INFO.json'] = (json.dumps(metadata, indent=2)+'\n').encode()
+    contents['SHA256SUMS'] = ''.join(f'{digest(contents[name])}  {name}\n' for name in sorted(contents)).encode()
+    base = f'prince-of-persia-remastered-v{VERSION}-{args.platform}-x86_64'
+    args.output.mkdir(parents=True, exist_ok=True)
+    archive = args.output/(base+('.zip' if args.platform == 'windows' else '.tar.gz'))
+    with archive.open('xb') as raw:
+        if args.platform == 'windows':
+            with zipfile.ZipFile(raw, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as target:
+                for name in sorted(contents):
+                    entry = zipfile.ZipInfo(f'{base}/{name}', (2026,1,1,0,0,0))
+                    entry.compress_type = zipfile.ZIP_DEFLATED
+                    entry.external_attr = 0o644 << 16
+                    target.writestr(entry, contents[name])
+        else:
+            with gzip.GzipFile(filename='', mode='wb', fileobj=raw, mtime=0) as compressed:
+                with tarfile.open(fileobj=compressed, mode='w|') as target:
+                    for name in sorted(contents):
+                        entry = tarfile.TarInfo(f'{base}/{name}')
+                        entry.size = len(contents[name])
+                        entry.mode = 0o755 if name in executable_names else 0o644
+                        target.addfile(entry, io.BytesIO(contents[name]))
+    archive.with_name(archive.name+'.sha256').write_text(f'{digest(archive.read_bytes())}  {archive.name}\n')
+    print(f'{archive}\n{len(contents)} files, {archive.stat().st_size:,} bytes')
+
+
+if __name__ == '__main__':
+    main()

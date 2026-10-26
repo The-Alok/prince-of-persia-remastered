@@ -19,6 +19,7 @@ The authors of this program may be contacted at https://forum.princed.org
 */
 
 #include "common.h"
+#include "pak.h"
 
 #ifdef USE_MENU
 
@@ -151,6 +152,7 @@ enum setting_ids {
 	SETTING_ENABLE_CONTROLLER_RUMBLE,
 	SETTING_JOYSTICK_THRESHOLD,
 	SETTING_JOYSTICK_ONLY_HORIZONTAL,
+	SETTING_GRAPHICS_PACK,
 	SETTING_FULLSCREEN,
 	SETTING_USE_HARDWARE_ACCELERATION,
 	SETTING_USE_CORRECT_ASPECT_RATIO,
@@ -368,6 +370,10 @@ int integer_scaling_possible =
 ;
 
 setting_type visuals_settings[] = {
+		{.id = SETTING_GRAPHICS_PACK, .style = SETTING_STYLE_NUMBER, .number_type = SETTING_BYTE,
+				.min = 0, .max = 3, .linked = &graphics_pack_index, .required = &multiple_paks_available,
+				.text = "Graphics pack",
+				.explanation = "Mac Native FULL - Native Macintosh rooms, actors and cutscenes (default).\nDOS - Classic PC graphics.\nSNES 1 - Recoloured Prince variant.\nSNES 2 - Alternative SNES graphics.\nSNES 3 - Base SNES graphics."},
 		{.id = SETTING_FULLSCREEN, .style = SETTING_STYLE_TOGGLE, .linked = &start_fullscreen,
 				.text = "Start fullscreen",
 				.explanation = "Start the game in fullscreen mode.\nYou can also toggle fullscreen by pressing Alt+Enter."},
@@ -1141,11 +1147,25 @@ void init_settings_list(setting_type* first_setting, int setting_count) {
 void init_menu() {
 	load_arrowhead_images();
 
+	// The graphics pack setting is only shown if there is more than one graphics pack to choose from.
+	for (int i = 0; i < visuals_settings_area.setting_count; ++i) {
+		if (visuals_settings[i].id == SETTING_GRAPHICS_PACK) {
+			if (multiple_paks_available) {
+				visuals_settings[i].max = num_available_paks - 1;
+			} else {
+				memmove(&visuals_settings[i], &visuals_settings[i + 1],
+				        sizeof(setting_type) * (visuals_settings_area.setting_count - 1 - i));
+				visuals_settings_area.setting_count--;
+			}
+			break;
+		}
+	}
+
 	init_pause_menu_items(pause_menu_items, COUNT(pause_menu_items));
 	init_pause_menu_items(settings_menu_items, COUNT(settings_menu_items));
 
 	init_settings_list(general_settings, COUNT(general_settings));
-	init_settings_list(visuals_settings, COUNT(visuals_settings));
+	init_settings_list(visuals_settings, visuals_settings_area.setting_count);
 	init_settings_list(gameplay_settings, COUNT(gameplay_settings));
 	init_settings_list(mods_settings, COUNT(mods_settings));
 	init_settings_list(level_settings, COUNT(level_settings));
@@ -1491,6 +1511,15 @@ void set_setting_value(setting_type* setting, int value) {
 
 void increase_setting(setting_type* setting, int old_value) {
 	int new_value;
+	if (setting->id == SETTING_GRAPHICS_PACK) {
+		if (num_available_paks > 1) {
+			byte new_index = (old_value + 1) % num_available_paks;
+			play_menu_sound(sound_20_loose_shake_1);
+			switch_graphics_pack(new_index);
+			were_settings_changed = true;
+		}
+		return;
+	}
 	if (setting->id == SETTING_JOYSTICK_THRESHOLD) {
 		new_value = ((old_value / 1000) + 1) * 1000; // Nearest higher multiple of 1000.
 	} else {
@@ -1504,6 +1533,15 @@ void increase_setting(setting_type* setting, int old_value) {
 
 void decrease_setting(setting_type* setting, int old_value) {
 	int new_value;
+	if (setting->id == SETTING_GRAPHICS_PACK) {
+		if (num_available_paks > 1) {
+			byte new_index = (old_value == 0) ? (num_available_paks - 1) : (old_value - 1);
+			play_menu_sound(sound_20_loose_shake_1);
+			switch_graphics_pack(new_index);
+			were_settings_changed = true;
+		}
+		return;
+	}
 	if (setting->id == SETTING_JOYSTICK_THRESHOLD) {
 		new_value = (((old_value+999) / 1000) - 1) * 1000; // Nearest lower multiple of 1000.
 	} else {
@@ -1522,16 +1560,23 @@ void draw_setting_explanation(setting_type* setting) {
 
 void draw_image_with_blending(image_type* image, int xpos, int ypos) {
 	SDL_Rect src_rect = {0, 0, image->w, image->h};
-	SDL_Rect dest_rect = {xpos, ypos, image->w, image->h};
+	SDL_Rect dest_rect = {xpos * get_render_scale(), ypos * get_render_scale(),
+	                      image->w * get_render_scale(), image->h * get_render_scale()};
 	SDL_SetColorKey(image, SDL_TRUE, 0);
-	if (SDL_BlitSurface(image, &src_rect, current_target_surface, &dest_rect) != 0) {
-		sdlperror("SDL_BlitSurface");
+	if (SDL_BlitScaled(image, &src_rect, current_target_surface, &dest_rect) != 0) {
+		sdlperror("SDL_BlitScaled");
 		quit(1);
 	}
 }
 
 #define print_setting_value(setting, value) print_setting_value_(setting, value, alloca(32), 32)
 char* print_setting_value_(setting_type* setting, int value, char* buffer, size_t buffer_size) {
+	if (setting->id == SETTING_GRAPHICS_PACK) {
+		if (value >= 0 && value < num_available_paks) {
+			snprintf_check(buffer, buffer_size, "%s", available_paks[value].name);
+			return buffer;
+		}
+	}
 	bool has_name = false;
 	names_list_type* list = setting->names_list;
 	size_t max_len = MIN(MAX_OPTION_VALUE_NAME_LENGTH, buffer_size);
@@ -2338,6 +2383,13 @@ void process_ingame_settings_user_managed(SDL_RWops* rw, rw_process_func_type pr
 	process(key_action    );
 	process(key_enter     );
 	process(key_esc       );
+	process(graphics_pack_index);
+	if (num_available_paks > 0) {
+		if (graphics_pack_index >= num_available_paks) {
+			graphics_pack_index = 0;
+		}
+		snprintf_check(graphics_pack_name, sizeof(graphics_pack_name), "%s", available_paks[graphics_pack_index].id);
+	}
 }
 
 void process_ingame_settings_mod_managed(SDL_RWops* rw, rw_process_func_type process_func) {

@@ -107,7 +107,7 @@ extern byte curr_modifier;
 // data:4CD8
 extern tile_and_mod leftroom_[3];
 // data:5950
-extern tile_and_mod row_below_left_[10];
+extern tile_and_mod row_below_left_[11]; // left neighbor plus all ten below-row tiles.
 // data:2274
 extern const word tbl_line[] INIT(= {0, 10, 20});
 
@@ -180,7 +180,7 @@ extern short peels_count;
 
 
 // data:5FF4
-extern back_table_type foretable[200];
+extern back_table_type foretable[FORETABLE_MAX];
 // data:463C
 extern back_table_type backtable[200];
 // data:3D38
@@ -723,6 +723,8 @@ extern word pop_window_height INIT(= 400);
 extern byte use_custom_levelset INIT(= 0);
 extern char levelset_name[POP_MAX_PATH];
 extern char mod_data_path[POP_MAX_PATH];
+extern char graphics_pack_name[POP_MAX_PATH];
+extern bool mod_has_data_dir INIT(= false);
 extern bool skip_mod_data_files;
 extern bool skip_normal_data_files;
 

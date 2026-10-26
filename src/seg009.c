@@ -19,6 +19,7 @@ The authors of this program may be contacted at https://forum.princed.org
 */
 
 #include "common.h"
+#include "pak.h"
 #include <time.h>
 #include <errno.h>
 
@@ -35,6 +36,265 @@ The authors of this program may be contacted at https://forum.princed.org
 #endif
 
 // Most functions in this file are different from those in the original game.
+
+// Native Macintosh renderer ------------------------------------------------------
+// Gameplay remains in the original 320x200 coordinate system. The actual
+// framebuffer in this branch is always 640x400. Legacy/DOS-size images are
+// nearest-neighbour scaled 2x at blit time, while images tagged as native
+// resolution are copied 1:1.
+#define SDLP_RENDER_SCALE 2
+#define SDLP_RENDER_WIDTH  (320 * SDLP_RENDER_SCALE)
+#define SDLP_RENDER_HEIGHT (200 * SDLP_RENDER_SCALE)
+
+// SDL_Surface::userdata carries compact metadata for native Macintosh images.
+// Metadata objects live in a static pool and are shared by all images with the
+// same SHPD origin, so temporary hflips can safely copy userdata without any
+// ownership/lifetime bookkeeping.
+typedef struct native_image_meta_type {
+	uint32_t magic;
+	short origin_x;
+	short origin_y;
+	byte has_origin;
+} native_image_meta_type;
+
+#define NATIVE_IMAGE_META_MAGIC 0x4D41434Eu /* 'MACN' */
+#define MAX_NATIVE_ORIGIN_PAIRS 2048
+static native_image_meta_type native_resolution_surface_tag = {NATIVE_IMAGE_META_MAGIC, 0, 0, 0};
+static native_image_meta_type native_origin_pool[MAX_NATIVE_ORIGIN_PAIRS];
+static int native_origin_pool_count = 0;
+
+static const native_image_meta_type* native_meta_for_origin(short origin_x, short origin_y) {
+	for (int i = 0; i < native_origin_pool_count; ++i) {
+		if (native_origin_pool[i].origin_x == origin_x && native_origin_pool[i].origin_y == origin_y) {
+			return &native_origin_pool[i];
+		}
+	}
+	if (native_origin_pool_count >= MAX_NATIVE_ORIGIN_PAIRS) {
+		return &native_resolution_surface_tag;
+	}
+	native_image_meta_type* meta = &native_origin_pool[native_origin_pool_count++];
+	meta->magic = NATIVE_IMAGE_META_MAGIC;
+	meta->origin_x = origin_x;
+	meta->origin_y = origin_y;
+	meta->has_origin = 1;
+	return meta;
+}
+
+static const native_image_meta_type* get_native_meta(const image_type* image) {
+	if (image == NULL || image->userdata == NULL) return NULL;
+	const native_image_meta_type* meta = (const native_image_meta_type*)image->userdata;
+	return (meta->magic == NATIVE_IMAGE_META_MAGIC) ? meta : NULL;
+}
+
+int get_render_scale(void) { return SDLP_RENDER_SCALE; }
+int get_render_width(void) { return SDLP_RENDER_WIDTH; }
+int get_render_height(void) { return SDLP_RENDER_HEIGHT; }
+
+bool is_native_resolution_image(const image_type* image) {
+	return get_native_meta(image) != NULL;
+}
+
+void mark_native_resolution_image(image_type* image) {
+	if (image != NULL) image->userdata = &native_resolution_surface_tag;
+}
+
+void mark_native_resolution_image_with_origin(image_type* image, short origin_x, short origin_y) {
+	if (image != NULL) image->userdata = (void*)native_meta_for_origin(origin_x, origin_y);
+}
+
+bool get_native_image_origin(const image_type* image, short* origin_x, short* origin_y) {
+	const native_image_meta_type* meta = get_native_meta(image);
+	if (meta == NULL || !meta->has_origin) return false;
+	if (origin_x) *origin_x = meta->origin_x;
+	if (origin_y) *origin_y = meta->origin_y;
+	return true;
+}
+
+int logical_image_width(const image_type* image) {
+	if (image == NULL) return 0;
+	return is_native_resolution_image(image) ? (image->w + SDLP_RENDER_SCALE - 1) / SDLP_RENDER_SCALE : image->w;
+}
+
+int logical_image_height(const image_type* image) {
+	if (image == NULL) return 0;
+	return is_native_resolution_image(image) ? (image->h + SDLP_RENDER_SCALE - 1) / SDLP_RENDER_SCALE : image->h;
+}
+
+static void blit_image_scaled_for_renderer(SDL_Surface* image, const SDL_Rect* src_rect,
+                                            SDL_Surface* target, int logical_x, int logical_y) {
+	SDL_Rect dest_rect;
+	dest_rect.x = logical_x * SDLP_RENDER_SCALE;
+	dest_rect.y = logical_y * SDLP_RENDER_SCALE;
+	if (is_native_resolution_image(image)) {
+		dest_rect.w = src_rect ? src_rect->w : image->w;
+		dest_rect.h = src_rect ? src_rect->h : image->h;
+		if (SDL_BlitSurface(image, src_rect, target, &dest_rect) != 0) {
+			sdlperror("blit_image_scaled_for_renderer: SDL_BlitSurface");
+		}
+	} else {
+		dest_rect.w = (src_rect ? src_rect->w : image->w) * SDLP_RENDER_SCALE;
+		dest_rect.h = (src_rect ? src_rect->h : image->h) * SDLP_RENDER_SCALE;
+		if (SDL_BlitScaled(image, src_rect, target, &dest_rect) != 0) {
+			sdlperror("blit_image_scaled_for_renderer: SDL_BlitScaled");
+		}
+	}
+}
+
+void draw_native_rect_physical(int x, int y, int w, int h, Uint32 rgb) {
+	SDL_Rect rect = {x, y, w, h};
+	SDL_FillRect(current_target_surface, &rect,
+	             SDL_MapRGB(current_target_surface->format, rgb >> 16, rgb >> 8, rgb));
+	if (need_drects) {
+		SDL_Rect clip, visible;
+		SDL_GetClipRect(current_target_surface, &clip);
+		if (SDL_IntersectRect(&rect, &clip, &visible)) {
+			rect_type dirty;
+			dirty.left = visible.x / 2;
+			dirty.top = visible.y / 2;
+			dirty.right = (visible.x + visible.w + 1) / 2;
+			dirty.bottom = (visible.y + visible.h + 1) / 2;
+			add_drect(&dirty);
+		}
+	}
+}
+
+void draw_native_image_physical(image_type* image, int physical_x, int physical_y) {
+	if (image == NULL) return;
+	SDL_Rect src_rect = {0, 0, image->w, image->h};
+	SDL_Rect dst_rect = {physical_x, physical_y, image->w, image->h};
+	SDL_SetSurfaceBlendMode(image, SDL_BLENDMODE_NONE);
+	if (SDL_ISPIXELFORMAT_INDEXED(image->format->format)) {
+		// Native pack builders reserve palette index 0 for transparent SHPD pixels.
+		SDL_SetColorKey(image, SDL_TRUE, 0);
+	} else {
+		SDL_SetSurfaceBlendMode(image, SDL_BLENDMODE_BLEND);
+	}
+	SDL_SetSurfaceAlphaMod(image, 255);
+	if (SDL_BlitSurface(image, &src_rect, current_target_surface, &dst_rect) != 0) {
+		sdlperror("draw_native_image_physical: SDL_BlitSurface");
+	}
+	if (need_drects) {
+		// Dirty rectangles remain in 320x200 logical coordinates. Round outward so
+		// odd native-pixel origins are never clipped away on the next frame.
+		rect_type rect;
+		rect.left = physical_x >= 0 ? physical_x / SDLP_RENDER_SCALE : -((-physical_x + SDLP_RENDER_SCALE - 1) / SDLP_RENDER_SCALE);
+		rect.top = physical_y >= 0 ? physical_y / SDLP_RENDER_SCALE : -((-physical_y + SDLP_RENDER_SCALE - 1) / SDLP_RENDER_SCALE);
+		rect.right = (physical_x + image->w + SDLP_RENDER_SCALE - 1) / SDLP_RENDER_SCALE;
+		rect.bottom = (physical_y + image->h + SDLP_RENDER_SCALE - 1) / SDLP_RENDER_SCALE;
+		add_drect(&rect);
+	}
+}
+
+/* Keep the shadow's XOR pass in native physical pixels. Clip before reading
+ * the framebuffer so negative/odd origins do not shift the source, and ignore
+ * transparent pixels rather than XORing their stored RGB into the room. */
+static void draw_native_xor(image_type* image, int physical_x, int physical_y) {
+	SDL_Rect destination = {physical_x, physical_y, image->w, image->h};
+	SDL_Rect clip, visible;
+	SDL_GetClipRect(current_target_surface, &clip);
+	if (!SDL_IntersectRect(&destination, &clip, &visible)) return;
+	if (SDL_ISPIXELFORMAT_INDEXED(image->format->format)) SDL_SetColorKey(image, SDL_TRUE, 0);
+	SDL_Surface* source = SDL_ConvertSurfaceFormat(image, SDL_PIXELFORMAT_ARGB8888, 0);
+	SDL_Surface* result = SDL_CreateRGBSurfaceWithFormat(0, visible.w, visible.h, 32, SDL_PIXELFORMAT_ARGB8888);
+	if (!source || !result) {
+		sdlperror("draw_native_xor: allocate surfaces");
+		SDL_FreeSurface(source);
+		SDL_FreeSurface(result);
+		return;
+	}
+	SDL_BlendMode saved_blend;
+	SDL_GetSurfaceBlendMode(current_target_surface, &saved_blend);
+	SDL_SetSurfaceBlendMode(current_target_surface, SDL_BLENDMODE_NONE);
+	SDL_Rect local = {0, 0, visible.w, visible.h};
+	SDL_BlitSurface(current_target_surface, &visible, result, &local);
+	SDL_SetSurfaceBlendMode(current_target_surface, saved_blend);
+	if (SDL_LockSurface(source) != 0) {
+		sdlperror("draw_native_xor: lock source");
+		SDL_FreeSurface(source);
+		SDL_FreeSurface(result);
+		return;
+	}
+	if (SDL_LockSurface(result) != 0) {
+		sdlperror("draw_native_xor: lock result");
+		SDL_UnlockSurface(source);
+		SDL_FreeSurface(source);
+		SDL_FreeSurface(result);
+		return;
+	}
+	for (int y = 0; y < visible.h; ++y) {
+		Uint32* src = (Uint32*)((byte*)source->pixels + (visible.y - physical_y + y) * source->pitch);
+		Uint32* dst = (Uint32*)((byte*)result->pixels + y * result->pitch);
+		for (int x = 0; x < visible.w; ++x) {
+			Uint32 color = src[visible.x - physical_x + x];
+			if (color & 0xFF000000) dst[x] ^= color & 0xFFFFFF;
+		}
+	}
+	SDL_UnlockSurface(source);
+	SDL_UnlockSurface(result);
+	SDL_SetSurfaceBlendMode(result, SDL_BLENDMODE_NONE);
+	SDL_BlitSurface(result, NULL, current_target_surface, &visible);
+	SDL_FreeSurface(source);
+	SDL_FreeSurface(result);
+	if (need_drects) {
+		rect_type dirty;
+		dirty.left = visible.x / SDLP_RENDER_SCALE;
+		dirty.top = visible.y / SDLP_RENDER_SCALE;
+		dirty.right = (visible.x + visible.w + SDLP_RENDER_SCALE - 1) / SDLP_RENDER_SCALE;
+		dirty.bottom = (visible.y + visible.h + SDLP_RENDER_SCALE - 1) / SDLP_RENDER_SCALE;
+		add_drect(&dirty);
+	}
+}
+
+/* v11.5: Exact Macintosh components are submitted in physical 640x400
+ * coordinates. The old physical path always alpha-blitted the source image,
+ * ignoring the requested SDLPoP blitter. That is correct for ordinary native
+ * art but wrong for compositor masks such as blitters_9_black: the supposed
+ * mask became a second colored floor wedge. Preserve physical placement while
+ * honoring the one mask operation currently required by the native compositor. */
+void draw_native_image_physical_blit(image_type* image, int physical_x, int physical_y, int blit) {
+	if (image == NULL) return;
+	if (blit == blitters_3_xor) {
+		draw_native_xor(image, physical_x, physical_y);
+		return;
+	}
+	if (blit != blitters_9_black) {
+		draw_native_image_physical(image, physical_x, physical_y);
+		return;
+	}
+
+	/* Build an alpha-preserving monochrome copy. This mirrors
+	 * method_3_blit_mono(..., blitters_9_black, 0), but keeps the exact native
+	 * physical origin instead of converting the position back to logical pixels. */
+	if (SDL_ISPIXELFORMAT_INDEXED(image->format->format)) {
+		SDL_SetColorKey(image, SDL_TRUE, 0);
+	}
+	SDL_Surface* black_mask = SDL_ConvertSurfaceFormat(image, SDL_PIXELFORMAT_ARGB8888, 0);
+	if (black_mask == NULL) {
+		sdlperror("draw_native_image_physical_blit: SDL_ConvertSurfaceFormat");
+		return;
+	}
+	mark_native_resolution_image(black_mask);
+	SDL_SetSurfaceBlendMode(black_mask, SDL_BLENDMODE_NONE);
+
+	if (SDL_LockSurface(black_mask) != 0) {
+		sdlperror("draw_native_image_physical_blit: SDL_LockSurface");
+		SDL_FreeSurface(black_mask);
+		return;
+	}
+	/* blitters_9_black is the compositor's literal occlusion color. */
+	uint32_t rgb_black = SDL_MapRGB(black_mask->format, 0, 0, 0) & 0xFFFFFF;
+	for (int y = 0; y < black_mask->h; ++y) {
+		uint32_t* pixel = (uint32_t*)((byte*)black_mask->pixels + y * black_mask->pitch);
+		for (int x = 0; x < black_mask->w; ++x) {
+			pixel[x] = (pixel[x] & 0xFF000000) | rgb_black;
+		}
+	}
+	SDL_UnlockSurface(black_mask);
+	SDL_SetSurfaceBlendMode(black_mask, SDL_BLENDMODE_BLEND);
+	SDL_SetSurfaceAlphaMod(black_mask, 255);
+	draw_native_image_physical(black_mask, physical_x, physical_y);
+	SDL_FreeSurface(black_mask);
+}
 
 void sdlperror(const char* header) {
 	const char* error = SDL_GetError();
@@ -268,6 +528,7 @@ directory_listing_type* create_directory_listing_and_find_first_file(const char*
 	if (ok) {
 		return data;
 	} else {
+		if (data->dp != NULL) closedir(data->dp);
 		free(data);
 		return NULL;
 	}
@@ -424,8 +685,7 @@ static FILE* open_dat_from_root_or_data_dir(const char* filename) {
 
 		// verify that this is a regular file and not a directory (otherwise, don't open)
 		struct stat path_stat;
-		stat(data_path, &path_stat);
-		if (S_ISREG(path_stat.st_mode)) {
+		if (stat(data_path, &path_stat) == 0 && S_ISREG(path_stat.st_mode)) {
 			fp = fopen(data_path, "rb");
 		}
 	}
@@ -473,7 +733,8 @@ dat_type* open_dat(const char* filename, int optional) {
 			goto failed;
 		pointer->handle = fp;
 		pointer->dat_table = dat_table;
-	} else if (optional == 0) {
+	} else if (optional == 0 && !is_pak_available()) {
+		// (If a graphics pack is loaded, the data may come from the pack instead of from a DAT file or folder.)
 		// showmessage will crash if we call it before certain things are initialized!
 		// Solution: In pop_main(), I moved the first open_dat() call after init_copyprot_dialog().
 		// /*
@@ -560,12 +821,32 @@ chtab_type* load_sprites_from_file(int resource,int palette_bits, int quit_on_er
 	}
 
 	int n_images = shpl->n_images;
+	int native_proom = 0;
+	if (resource == 950 && uses_mac_native_full()) {
+		/* SHPD 950 is the Mac background; its props are in SHPD 960.
+		 * Preserve one-based prop indices but load 962..975, not DOS 952..963. */
+		int origin_size = 0;
+		void* origin = load_data_from_pak("PV", 975, "org", &origin_size);
+		native_proom = origin != NULL && origin_size == 4;
+		free(origin);
+		if (native_proom) n_images = 15;
+	}
+	if (resource == 150 && uses_mac_native_full()) {
+		/* The DOS SHPL stops at 23, while native SHPD 150 has 33 images.
+		 * Its final ten include green/blue potion bubbles. Keep the installed
+		 * pack unchanged and enlarge only this native table, when its final
+		 * origin sidecar confirms that the extended group is present. */
+		int origin_size = 0;
+		void* origin = load_data_from_pak("PRINCE", 183, "org", &origin_size);
+		if (origin != NULL && origin_size == 4) n_images = MAX(n_images, 33);
+		free(origin);
+	}
 	size_t alloc_size = sizeof(chtab_type) + sizeof(void *) * n_images;
 	chtab_type* chtab = (chtab_type*) malloc(alloc_size);
 	memset(chtab, 0, alloc_size);
 	chtab->n_images = n_images;
 	for (int i = 1; i <= n_images; i++) {
-		SDL_Surface* image = load_image(resource + i, pal_ptr);
+		SDL_Surface* image = load_image(resource + i + (native_proom && i > 1 ? 10 : 0), pal_ptr);
 //		if (image == NULL) printf(" failed");
 		if (image != NULL) {
 /*
@@ -585,6 +866,7 @@ chtab_type* load_sprites_from_file(int resource,int palette_bits, int quit_on_er
 		chtab->images[i-1] = image;
 	}
 	set_loaded_palette(pal_ptr);
+	free(shpl);
 	return chtab;
 }
 
@@ -883,17 +1165,68 @@ image_type* decode_image(image_data_type* image_data, dat_pal_type* palette) {
 	return image;
 }
 
+// Graphics packs (data/res_*.pak) -------------------------------------------------------------
+// Returns true if the selected graphics pack should be searched before the DAT files / loose files.
+// A custom levelset that brings its own graphics (a data folder or DAT files) keeps priority over the pack.
+static bool pak_has_priority(void) {
+	if (!is_pak_available()) return false;
+	if (use_custom_levelset && !always_use_original_graphics && !skip_mod_data_files) {
+		if (mod_has_data_dir) return false;
+		for (dat_type* p = dat_chain_ptr; p != NULL; p = p->next_dat) {
+			if (p->handle != NULL) return false;
+		}
+	}
+	return true;
+}
+
+// The pack stores resources per folder (KID, PRINCE, VPALACE, ...), named like the DAT files without the extension.
+static void pak_folder_of_dat(const dat_type* p, char* folder, size_t size) {
+	if (size == 0) return;
+	size_t count = strnlen(p->filename, size - 1);
+	memcpy(folder, p->filename, count);
+	folder[count] = '\0';
+	size_t len = strlen(folder);
+	if (len >= 5 && folder[len-4] == '.') folder[len-4] = '\0';
+}
+
+static image_type* pak_load_image_from_chain(int resource_id) {
+	for (dat_type* p = dat_chain_ptr; p != NULL; p = p->next_dat) {
+		char folder[16];
+		pak_folder_of_dat(p, folder, sizeof(folder));
+		image_type* img = load_image_from_pak(folder, resource_id);
+		if (img != NULL) return img;
+	}
+	return NULL;
+}
+
+static void* pak_load_data_from_chain(int resource, const char* extension, int* out_size) {
+	for (dat_type* p = dat_chain_ptr; p != NULL; p = p->next_dat) {
+		char folder[16];
+		pak_folder_of_dat(p, folder, sizeof(folder));
+		// Sounds always come from the sound DAT files (IBM_SND = PC speaker, DIGISND = digital, MIDISND = MIDI music).
+		// The packs only contain the PC speaker set; using it here would hide the better digital/MIDI versions.
+		if (strncmp(folder, "IBM_SND", 7) == 0 || strncmp(folder, "DIGISND", 7) == 0 || strncmp(folder, "MIDISND", 7) == 0) continue;
+		void* area = load_data_from_pak(folder, resource, extension, out_size);
+		if (area != NULL) return area;
+	}
+	return NULL;
+}
+
 // seg009:121A
 image_type* load_image(int resource_id, dat_pal_type* palette) {
 	// stub
-	data_location result;
-	int size;
-	void* image_data = load_from_opendats_alloc(resource_id, "png", &result, &size);
 	image_type* image = NULL;
+	if (pak_has_priority()) {
+		image = pak_load_image_from_chain(resource_id);
+	}
+	data_location result = data_none;
+	int size = 0;
+	void* image_data = NULL;
+	if (image == NULL) {
+	image_data = load_from_opendats_alloc(resource_id, "png", &result, &size);
 	switch (result) {
 		case data_none:
-			return NULL;
-		break;
+			break;
 		case data_DAT: { // DAT
 			image = decode_image((image_data_type*) image_data, palette);
 		} break;
@@ -914,6 +1247,11 @@ image_type* load_image(int resource_id, dat_pal_type* palette) {
 	}
 	if (image_data != NULL) free(image_data);
 
+	// Fall back to the graphics pack if the DAT files / loose files / custom levelset did not provide this image.
+	if (image == NULL && is_pak_available()) {
+		image = pak_load_image_from_chain(resource_id);
+	}
+	}
 
 	if (image != NULL) {
 		// should immediately start using the onscreen pixel format, so conversion will not be needed
@@ -991,9 +1329,9 @@ surface_type* make_offscreen_buffer(const rect_type* rect) {
 	// stub
 #ifndef USE_ALPHA
 	// Bit order matches onscreen buffer, good for fading.
-	return SDL_CreateRGBSurface(0, rect->right, rect->bottom, 24, Rmsk, Gmsk, Bmsk, 0);
+	return SDL_CreateRGBSurface(0, rect->right * SDLP_RENDER_SCALE, rect->bottom * SDLP_RENDER_SCALE, 24, Rmsk, Gmsk, Bmsk, 0);
 #else
-	return SDL_CreateRGBSurface(0, rect->right, rect->bottom, 32, Rmsk, Gmsk, Bmsk, Amsk);
+	return SDL_CreateRGBSurface(0, rect->right * SDLP_RENDER_SCALE, rect->bottom * SDLP_RENDER_SCALE, 32, Rmsk, Gmsk, Bmsk, Amsk);
 #endif
 	//return surface;
 }
@@ -1802,15 +2140,16 @@ peel_type* read_peel_from_screen(const rect_type* rect) {
 	//memset(&result, 0, sizeof(result));
 	result->rect = *rect;
 #ifndef USE_ALPHA
-	SDL_Surface* peel_surface = SDL_CreateRGBSurface(0, rect->right - rect->left, rect->bottom - rect->top,
+	SDL_Surface* peel_surface = SDL_CreateRGBSurface(0, (rect->right - rect->left) * SDLP_RENDER_SCALE, (rect->bottom - rect->top) * SDLP_RENDER_SCALE,
 	                                                 24, Rmsk, Gmsk, Bmsk, 0);
 #else
-	SDL_Surface* peel_surface = SDL_CreateRGBSurface(0, rect->right - rect->left, rect->bottom - rect->top, 32, Rmsk, Gmsk, Bmsk, Amsk);
+	SDL_Surface* peel_surface = SDL_CreateRGBSurface(0, (rect->right - rect->left) * SDLP_RENDER_SCALE, (rect->bottom - rect->top) * SDLP_RENDER_SCALE, 32, Rmsk, Gmsk, Bmsk, Amsk);
 #endif
 	if (peel_surface == NULL) {
 		sdlperror("read_peel_from_screen: SDL_CreateRGBSurface");
 		quit(1);
 	}
+	mark_native_resolution_image(peel_surface);
 	result->peel = peel_surface;
 	rect_type target_rect = {0, 0, rect->right - rect->left, rect->bottom - rect->top};
 	method_1_blit_rect(result->peel, current_target_surface, &target_rect, rect, 0);
@@ -2366,15 +2705,14 @@ sound_buffer_type* convert_digi_sound(sound_buffer_type* digi_buffer) {
 	int source_length = waveinfo.sample_count;
 	int expanded_frames = source_length * digi_audiospec->freq / waveinfo.sample_rate;
 	int expanded_length = expanded_frames * 2 * sizeof(short);
-	sound_buffer_type* converted_buffer = malloc(sizeof(sound_buffer_type) + expanded_length);
+	sound_buffer_type* converted_buffer = malloc(sizeof(sound_buffer_type));
 
 	converted_buffer->type = sound_digi_converted;
 	converted_buffer->converted.length = expanded_length;
 
 	byte* source = waveinfo.samples;
-	//short* dest = converted_buffer->converted.samples;
-	short* dest = malloc(sizeof(short) * converted_buffer->converted.length);
-        converted_buffer->converted.samples = dest;
+	short* dest = malloc(expanded_length);
+	converted_buffer->converted.samples = dest;
 
 	for (int i = 0; i < expanded_frames; ++i) {
 		float src_frame_float = i * freq_ratio;
@@ -2424,6 +2762,11 @@ void free_sound(sound_buffer_type* buffer) {
 	if (buffer->type == sound_ogg) {
 		stb_vorbis_close(buffer->ogg.decoder);
 		free(buffer->ogg.file_contents);
+	}
+	if (buffer->type == sound_digi_converted) {
+		/* Resource reloads can release the sample currently owned by the callback. */
+		if (digi_buffer == (byte*)buffer->converted.samples) stop_digi();
+		free(buffer->converted.samples);
 	}
 	free(buffer);
 }
@@ -2482,9 +2825,9 @@ int check_sound_playing() {
 void apply_aspect_ratio() {
 	// Allow us to use a consistent set of screen co-ordinates, even if the screen size changes
 	if (use_correct_aspect_ratio) {
-		SDL_RenderSetLogicalSize(renderer_, 320 * 5, 200 * 6); // 4:3
+		SDL_RenderSetLogicalSize(renderer_, SDLP_RENDER_WIDTH * 5, SDLP_RENDER_HEIGHT * 6); // 4:3
 	} else {
-		SDL_RenderSetLogicalSize(renderer_, 320, 200); // 16:10
+		SDL_RenderSetLogicalSize(renderer_, SDLP_RENDER_WIDTH, SDLP_RENDER_HEIGHT); // 16:10
 	}
 	window_resized();
 }
@@ -2509,8 +2852,8 @@ void window_resized() {
 void init_overlay(void) {
 	static bool initialized = false;
 	if (!initialized) {
-		overlay_surface = SDL_CreateRGBSurface(0, 320, 200, 32, Rmsk, Gmsk, Bmsk, Amsk);
-		merged_surface = SDL_CreateRGBSurface(0, 320, 200, 24, Rmsk, Gmsk, Bmsk, 0);
+		overlay_surface = SDL_CreateRGBSurface(0, SDLP_RENDER_WIDTH, SDLP_RENDER_HEIGHT, 32, Rmsk, Gmsk, Bmsk, Amsk);
+		merged_surface = SDL_CreateRGBSurface(0, SDLP_RENDER_WIDTH, SDLP_RENDER_HEIGHT, 24, Rmsk, Gmsk, Bmsk, 0);
 		initialized = true;
 	}
 }
@@ -2522,27 +2865,27 @@ void init_scaling(void) {
 	if (renderer_ == NULL) return;
 
 	if (texture_sharp == NULL) {
-		texture_sharp = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, 320, 200);
+		texture_sharp = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, SDLP_RENDER_WIDTH, SDLP_RENDER_HEIGHT);
 	}
 	if (scaling_type == 1) {
 		if (!is_renderer_targettexture_supported && onscreen_surface_2x == NULL) {
 #ifdef __amigaos4__
-			overlay_surface = SDL_CreateRGBSurface(0, 320*2, 200*2, 24, Rmsk, Gmsk, Bmsk, 0);
+			overlay_surface = SDL_CreateRGBSurface(0, SDLP_RENDER_WIDTH*2, SDLP_RENDER_HEIGHT*2, 24, Rmsk, Gmsk, Bmsk, 0);
 #else
-			onscreen_surface_2x = SDL_CreateRGBSurface(0, 320*2, 200*2, 24, Rmsk, Gmsk, Bmsk, 0);
+			onscreen_surface_2x = SDL_CreateRGBSurface(0, SDLP_RENDER_WIDTH*2, SDLP_RENDER_HEIGHT*2, 24, Rmsk, Gmsk, Bmsk, 0);
 #endif
 		}
 		if (texture_fuzzy == NULL) {
 			SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
 			int access = is_renderer_targettexture_supported ? SDL_TEXTUREACCESS_TARGET : SDL_TEXTUREACCESS_STREAMING;
-			texture_fuzzy = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGB24, access, 320*2, 200*2);
+			texture_fuzzy = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGB24, access, SDLP_RENDER_WIDTH*2, SDLP_RENDER_HEIGHT*2);
 			SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
 		}
 		target_texture = texture_fuzzy;
 	} else if (scaling_type == 2) {
 		if (texture_blurry == NULL) {
 			SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
-			texture_blurry = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, 320, 200);
+			texture_blurry = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, SDLP_RENDER_WIDTH, SDLP_RENDER_HEIGHT);
 			SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
 		}
 		target_texture = texture_blurry;
@@ -2643,7 +2986,7 @@ void set_gr_mode(byte grmode) {
 	 * subsequently displayed.
 	 * The function handling the screen updates is update_screen()
 	 * */
-	onscreen_surface_ = SDL_CreateRGBSurface(0, 320, 200, 24, Rmsk, Gmsk, Bmsk, 0);
+	onscreen_surface_ = SDL_CreateRGBSurface(0, SDLP_RENDER_WIDTH, SDLP_RENDER_HEIGHT, 24, Rmsk, Gmsk, Bmsk, 0);
 	if (onscreen_surface_ == NULL) {
 		sdlperror("set_gr_mode: SDL_CreateRGBSurface");
 		quit(1);
@@ -2956,6 +3299,17 @@ void close_dat(dat_type* pointer) {
 
 // seg009:9F80
 void *load_from_opendats_alloc(int resource, const char* extension, data_location* out_result, int* out_size) {
+	// Images (png) are handled by load_image(); here the pack only supplies palettes and binary data.
+	bool pack_can_supply = (strcmp(extension, "png") != 0);
+	if (pack_can_supply && pak_has_priority()) {
+		int pak_size = 0;
+		void* pak_area = pak_load_data_from_chain(resource, extension, &pak_size);
+		if (pak_area != NULL) {
+			if (out_result != NULL) *out_result = data_directory;
+			if (out_size != NULL) *out_size = pak_size;
+			return pak_area;
+		}
+	}
 	// stub
 	//printf("id = %d\n",resource);
 	dat_type* pointer;
@@ -2966,7 +3320,19 @@ void *load_from_opendats_alloc(int resource, const char* extension, data_locatio
 	load_from_opendats_metadata(resource, extension, &fp, &result, &checksum, &size, &pointer);
 	if (out_result != NULL) *out_result = result;
 	if (out_size != NULL) *out_size = size;
-	if (result == data_none) return NULL;
+	if (result == data_none) {
+		// Fall back to the graphics pack (e.g. a custom levelset that does not provide this resource).
+		if (pack_can_supply && is_pak_available()) {
+			int pak_size = 0;
+			void* pak_area = pak_load_data_from_chain(resource, extension, &pak_size);
+			if (pak_area != NULL) {
+				if (out_result != NULL) *out_result = data_directory;
+				if (out_size != NULL) *out_size = pak_size;
+				return pak_area;
+			}
+		}
+		return NULL;
+	}
 	void* area = malloc(size);
 	//read(fd, area, size);
 	if (fread(area, size, 1, fp) != 1) {
@@ -2983,6 +3349,16 @@ void *load_from_opendats_alloc(int resource, const char* extension, data_locatio
 
 // seg009:A172
 int load_from_opendats_to_area(int resource,void* area,int length, const char* extension) {
+	bool pack_can_supply = (strcmp(extension, "png") != 0);
+	if (pack_can_supply && pak_has_priority()) {
+		int pak_size = 0;
+		void* pak_area = pak_load_data_from_chain(resource, extension, &pak_size);
+		if (pak_area != NULL) {
+			memcpy(area, pak_area, MIN(pak_size, length));
+			free(pak_area);
+			return 0;
+		}
+	}
 	// stub
 	//return 0;
 	dat_type* pointer;
@@ -2991,7 +3367,18 @@ int load_from_opendats_to_area(int resource,void* area,int length, const char* e
 	int size;
 	FILE* fp = NULL;
 	load_from_opendats_metadata(resource, extension, &fp, &result, &checksum, &size, &pointer);
-	if (result == data_none) return 0;
+	if (result == data_none) {
+		// Fall back to the graphics pack (e.g. a custom levelset that does not provide this resource).
+		if (pack_can_supply && is_pak_available()) {
+			int pak_size = 0;
+			void* pak_area = pak_load_data_from_chain(resource, extension, &pak_size);
+			if (pak_area != NULL) {
+				memcpy(area, pak_area, MIN(pak_size, length));
+				free(pak_area);
+			}
+		}
+		return 0;
+	}
 	if (fread(area, MIN(size, length), 1, fp) != 1) {
 		fprintf(stderr, "%s: %s, resource %d, size %d, failed: %s\n",
 			__func__, pointer->filename, resource,
@@ -3006,10 +3393,10 @@ int load_from_opendats_to_area(int resource,void* area,int length, const char* e
 // SDL-specific implementations
 
 void rect_to_sdlrect(const rect_type* rect, SDL_Rect* sdlrect) {
-	sdlrect->x = rect->left;
-	sdlrect->y = rect->top;
-	sdlrect->w = rect->right - rect->left;
-	sdlrect->h = rect->bottom - rect->top;
+	sdlrect->x = rect->left * SDLP_RENDER_SCALE;
+	sdlrect->y = rect->top * SDLP_RENDER_SCALE;
+	sdlrect->w = (rect->right - rect->left) * SDLP_RENDER_SCALE;
+	sdlrect->h = (rect->bottom - rect->top) * SDLP_RENDER_SCALE;
 }
 
 void method_1_blit_rect(surface_type* target_surface,surface_type* source_surface,const rect_type* target_rect, const rect_type* source_rect,int blit) {
@@ -3074,15 +3461,12 @@ image_type* method_3_blit_mono(image_type* image,int xpos,int ypos,int blitter,b
 	SDL_UnlockSurface(colored_image);
 
 	SDL_Rect src_rect = {0, 0, image->w, image->h};
-	SDL_Rect dest_rect = {xpos, ypos, image->w, image->h};
+	if (is_native_resolution_image(image)) mark_native_resolution_image(colored_image);
 
 	SDL_SetSurfaceBlendMode(colored_image, SDL_BLENDMODE_BLEND);
 	SDL_SetSurfaceBlendMode(current_target_surface, SDL_BLENDMODE_BLEND);
 	SDL_SetSurfaceAlphaMod(colored_image, 255);
-	if (SDL_BlitSurface(colored_image, &src_rect, current_target_surface, &dest_rect) != 0) {
-		sdlperror("method_3_blit_mono: SDL_BlitSurface");
-		quit(1);
-	}
+	blit_image_scaled_for_renderer(colored_image, &src_rect, current_target_surface, xpos, ypos);
 	SDL_FreeSurface(colored_image);
 
 	return image;
@@ -3188,52 +3572,54 @@ void draw_rect_contours(const rect_type* rect, byte color) {
 }
 
 void blit_xor(SDL_Surface* target_surface, SDL_Rect* dest_rect, SDL_Surface* image, SDL_Rect* src_rect) {
-	if (dest_rect->w != src_rect->w || dest_rect->h != src_rect->h) {
-		printf("blit_xor: dest_rect and src_rect have different sizes\n");
-		quit(1);
-	}
 	SDL_Surface* helper_surface = SDL_CreateRGBSurface(0, dest_rect->w, dest_rect->h, 24, Rmsk, Gmsk, Bmsk, 0);
 	if (helper_surface == NULL) {
 		sdlperror("blit_xor: SDL_CreateRGBSurface");
 		quit(1);
 	}
-	SDL_Surface* image_24 = SDL_ConvertSurface(image, helper_surface->format, 0);
-	//SDL_CreateRGBSurface(0, src_rect->w, src_rect->h, 24, Rmsk, Gmsk, Bmsk, 0);
-	if (image_24 == NULL) {
-		sdlperror("blit_xor: SDL_CreateRGBSurface");
+	SDL_Surface* converted = SDL_ConvertSurface(image, helper_surface->format, 0);
+	if (converted == NULL) {
+		sdlperror("blit_xor: SDL_ConvertSurface");
 		quit(1);
 	}
-	SDL_Rect dest_rect2 = *src_rect;
-	// Read what is currently where we want to draw the new image.
-	if (SDL_BlitSurface(target_surface, dest_rect, helper_surface, &dest_rect2) != 0) {
-		sdlperror("blit_xor: SDL_BlitSurface");
-		quit(1);
+	SDL_Surface* image_24 = converted;
+	if (converted->w != dest_rect->w || converted->h != dest_rect->h) {
+		image_24 = SDL_CreateRGBSurface(0, dest_rect->w, dest_rect->h, 24, Rmsk, Gmsk, Bmsk, 0);
+		if (image_24 == NULL) {
+			sdlperror("blit_xor: SDL_CreateRGBSurface scaled image");
+			quit(1);
+		}
+		SDL_Rect scaled_dst = {0, 0, dest_rect->w, dest_rect->h};
+		if (SDL_BlitScaled(converted, src_rect, image_24, &scaled_dst) != 0) {
+			sdlperror("blit_xor: SDL_BlitScaled");
+			quit(1);
+		}
 	}
-	if (SDL_LockSurface(image_24) != 0) {
-		sdlperror("blit_xor: SDL_LockSurface");
-		quit(1);
-	}
-	if (SDL_LockSurface(helper_surface) != 0) {
-		sdlperror("blit_xor: SDL_LockSurface");
-		quit(1);
-	}
-	int size = helper_surface->h * helper_surface->pitch;
-	byte *p_src = (byte*) image_24->pixels;
-	byte *p_dest = (byte*) helper_surface->pixels;
 
-	// Xor the old area with the image.
-	for (int i = 0; i < size; ++i) {
-		*p_dest ^= *p_src;
-		++p_src; ++p_dest;
+	SDL_Rect local_rect = {0, 0, dest_rect->w, dest_rect->h};
+	if (SDL_BlitSurface(target_surface, dest_rect, helper_surface, &local_rect) != 0) {
+		sdlperror("blit_xor: read target");
+		quit(1);
+	}
+	if (SDL_LockSurface(image_24) != 0 || SDL_LockSurface(helper_surface) != 0) {
+		sdlperror("blit_xor: SDL_LockSurface");
+		quit(1);
+	}
+	int rows = MIN(image_24->h, helper_surface->h);
+	int row_bytes = MIN(image_24->pitch, helper_surface->pitch);
+	for (int y = 0; y < rows; ++y) {
+		byte* p_src = (byte*)image_24->pixels + y * image_24->pitch;
+		byte* p_dest = (byte*)helper_surface->pixels + y * helper_surface->pitch;
+		for (int i = 0; i < row_bytes; ++i) p_dest[i] ^= p_src[i];
 	}
 	SDL_UnlockSurface(image_24);
 	SDL_UnlockSurface(helper_surface);
-	// Put the new area in place of the old one.
-	if (SDL_BlitSurface(helper_surface, src_rect, target_surface, dest_rect) != 0) {
-		sdlperror("blit_xor: SDL_BlitSurface 2065");
+	if (SDL_BlitSurface(helper_surface, &local_rect, target_surface, dest_rect) != 0) {
+		sdlperror("blit_xor: write target");
 		quit(1);
 	}
-	SDL_FreeSurface(image_24);
+	if (image_24 != converted) SDL_FreeSurface(image_24);
+	SDL_FreeSurface(converted);
 	SDL_FreeSurface(helper_surface);
 }
 
@@ -3245,6 +3631,7 @@ void draw_colored_torch(int color, SDL_Surface* image, int xpos, int ypos) {
 	}
 
 	SDL_Surface* colored_image = SDL_ConvertSurfaceFormat(image, SDL_PIXELFORMAT_ARGB8888, 0);
+	if (is_native_resolution_image(image)) mark_native_resolution_image(colored_image);
 	SDL_SetSurfaceBlendMode(colored_image, SDL_BLENDMODE_NONE);
 
 	if (SDL_LockSurface(colored_image) != 0) {
@@ -3290,7 +3677,9 @@ image_type* method_6_blit_img_to_scr(image_type* image,int xpos,int ypos,int bli
 	}
 
 	SDL_Rect src_rect = {0, 0, image->w, image->h};
-	SDL_Rect dest_rect = {xpos, ypos, image->w, image->h};
+	SDL_Rect dest_rect = {xpos * SDLP_RENDER_SCALE, ypos * SDLP_RENDER_SCALE,
+	                      is_native_resolution_image(image) ? image->w : image->w * SDLP_RENDER_SCALE,
+	                      is_native_resolution_image(image) ? image->h : image->h * SDLP_RENDER_SCALE};
 
 	if (blit == blitters_3_xor) {
 		blit_xor(current_target_surface, &dest_rect, image, &src_rect);
@@ -3329,10 +3718,7 @@ image_type* method_6_blit_img_to_scr(image_type* image,int xpos,int ypos,int bli
 			//printf("SDL_BLENDMODE_BLEND\n");
 		}
 	}
-	if (SDL_BlitSurface(image, &src_rect, current_target_surface, &dest_rect) != 0) {
-		sdlperror("method_6_blit_img_to_scr: SDL_BlitSurface 2247");
-		//quit(1);
-	}
+	blit_image_scaled_for_renderer(image, &src_rect, current_target_surface, xpos, ypos);
 /*
 	if (SDL_SetSurfaceAlphaMod(image, 0) != 0) {
 		sdlperror("method_6_blit_img_to_scr: SDL_SetAlpha");
@@ -3943,6 +4329,35 @@ rect_type* offset2_rect(rect_type* dest,const rect_type *source,int delta_x,int 
 }
 
 #ifdef USE_FADE
+/* Native art has independent RGB palettes. Fade the supplied physical image,
+ * not the global room buffer (which is only 640x384 during gameplay). Keep
+ * pitch/format/alpha independent and preserve the destination's clip. */
+static void mac_draw_fade(palette_fade_type* fade, int amount) {
+	SDL_Surface* source = fade->native_source;
+	SDL_Surface* target = onscreen_surface_;
+	SDL_Rect clip;
+	SDL_GetClipRect(target, &clip);
+	int right = MIN(MIN(source->w, target->w), clip.x + clip.w);
+	int bottom = MIN(MIN(source->h, target->h), clip.y + clip.h);
+	if (SDL_LockSurface(source) != 0) { sdlperror("mac_draw_fade: source"); quit(1); }
+	if (SDL_LockSurface(target) != 0) { sdlperror("mac_draw_fade: target"); quit(1); }
+	for (int y = clip.y; y < bottom; ++y) {
+		for (int x = clip.x; x < right; ++x) {
+			Uint32 pixel = 0;
+			byte* src = (byte*)source->pixels + y * source->pitch + x * source->format->BytesPerPixel;
+			byte* dst = (byte*)target->pixels + y * target->pitch + x * target->format->BytesPerPixel;
+			memcpy(&pixel, src, source->format->BytesPerPixel);
+			Uint8 r, g, b, a;
+			SDL_GetRGBA(pixel, source->format, &r, &g, &b, &a);
+			pixel = SDL_MapRGBA(target->format, MAX(0, r - amount),
+			                      MAX(0, g - amount), MAX(0, b - amount), a);
+			memcpy(dst, &pixel, target->format->BytesPerPixel);
+		}
+	}
+	SDL_UnlockSurface(target);
+	SDL_UnlockSurface(source);
+}
+
 // seg009:19EF
 void fade_in_2(surface_type* source_surface,int which_rows) {
 	palette_fade_type* palette_buffer;
@@ -3962,6 +4377,8 @@ void fade_in_2(surface_type* source_surface,int which_rows) {
 palette_fade_type* make_pal_buffer_fadein(surface_type* source_surface,int which_rows,int wait_time) {
 	palette_fade_type* palette_buffer;
 	palette_buffer = (palette_fade_type*) malloc(sizeof(palette_fade_type));
+	palette_buffer->native_source = uses_mac_native_full() ? source_surface : NULL;
+	palette_buffer->native_snapshot = NULL;
 	palette_buffer->which_rows = which_rows;
 	palette_buffer->wait_time = wait_time;
 	palette_buffer->fade_pos = 0x40;
@@ -3969,6 +4386,7 @@ palette_fade_type* make_pal_buffer_fadein(surface_type* source_surface,int which
 	palette_buffer->proc_fade_frame = &fade_in_frame;
 	read_palette_256(palette_buffer->original_pal);
 	memcpy(palette_buffer->faded_pal, palette_buffer->original_pal, sizeof(palette_buffer->faded_pal));
+	if (palette_buffer->native_source) return palette_buffer;
 	for (word curr_row = 0, curr_row_mask = 1; curr_row < 0x10; ++curr_row, curr_row_mask<<=1) {
 		if (which_rows & curr_row_mask) {
 			memset(palette_buffer->faded_pal + (curr_row<<4), 0, sizeof(rgb_type[0x10]));
@@ -3984,6 +4402,11 @@ palette_fade_type* make_pal_buffer_fadein(surface_type* source_surface,int which
 // seg009:1B64
 void pal_restore_free_fadein(palette_fade_type* palette_buffer) {
 	set_pal_256(palette_buffer->original_pal);
+	if (palette_buffer->native_source) {
+		mac_draw_fade(palette_buffer, 0);
+		free(palette_buffer);
+		return;
+	}
 	free(palette_buffer);
 	// for RGB
 	method_1_blit_rect(onscreen_surface_, offscreen_surface, &screen_rect, &screen_rect, 0);
@@ -3996,6 +4419,11 @@ int fade_in_frame(palette_fade_type* palette_buffer) {
 
 	//printf("start ticks = %u\n",SDL_GetTicks());
 	--palette_buffer->fade_pos;
+	if (palette_buffer->native_source) {
+		mac_draw_fade(palette_buffer, palette_buffer->fade_pos * 4);
+		do_simple_wait(1);
+		return palette_buffer->fade_pos == 0;
+	}
 	for (word start=0,current_row_mask=1; start<0x100; start+=0x10, current_row_mask<<=1) {
 		if (palette_buffer->which_rows & current_row_mask) {
 			//var_12 = palette_buffer->
@@ -4073,6 +4501,18 @@ void fade_out_2(int rows) {
 palette_fade_type* make_pal_buffer_fadeout(int which_rows,int wait_time) {
 	palette_fade_type* palette_buffer;
 	palette_buffer = (palette_fade_type*) malloc(sizeof(palette_fade_type));
+	palette_buffer->native_source = NULL;
+	palette_buffer->native_snapshot = NULL;
+	if (uses_mac_native_full()) {
+		if (is_cutscene) {
+			/* draw_princess_room_bg() continues animating this source. */
+			palette_buffer->native_source = offscreen_surface;
+		} else {
+			palette_buffer->native_snapshot = SDL_ConvertSurface(onscreen_surface_, onscreen_surface_->format, 0);
+			if (!palette_buffer->native_snapshot) { sdlperror("make_pal_buffer_fadeout: snapshot"); quit(1); }
+			palette_buffer->native_source = palette_buffer->native_snapshot;
+		}
+	}
 	palette_buffer->which_rows = which_rows;
 	palette_buffer->wait_time = wait_time;
 	palette_buffer->fade_pos = 00; // modified
@@ -4081,7 +4521,8 @@ palette_fade_type* make_pal_buffer_fadeout(int which_rows,int wait_time) {
 	read_palette_256(palette_buffer->original_pal);
 	memcpy(palette_buffer->faded_pal, palette_buffer->original_pal, sizeof(palette_buffer->faded_pal));
 	// for RGB
-	method_1_blit_rect(onscreen_surface_, offscreen_surface, &screen_rect, &screen_rect, 0);
+	if (!palette_buffer->native_source)
+		method_1_blit_rect(onscreen_surface_, offscreen_surface, &screen_rect, &screen_rect, 0);
 	return palette_buffer;
 }
 
@@ -4093,6 +4534,7 @@ void pal_restore_free_fadeout(palette_fade_type* palette_buffer) {
 	draw_rect(&screen_rect, color_0_black);
 	current_target_surface = surface;
 	set_pal_256(palette_buffer->original_pal);
+	SDL_FreeSurface(palette_buffer->native_snapshot);
 	free(palette_buffer);
 	// for RGB
 	method_5_rect(&screen_rect, 0, color_0_black);
@@ -4103,6 +4545,11 @@ int fade_out_frame(palette_fade_type* palette_buffer) {
 	word finished_fading = 1;
 	++palette_buffer->fade_pos; // modified
 	/**/start_timer(timer_1, palette_buffer->wait_time); // too slow?
+	if (palette_buffer->native_source) {
+		mac_draw_fade(palette_buffer, palette_buffer->fade_pos * 4);
+		do_simple_wait(timer_1);
+		return palette_buffer->fade_pos >= 0x40;
+	}
 	for (word start=0,current_row_mask=1; start<0x100; start+=0x10, current_row_mask<<=1) {
 		if (palette_buffer->which_rows & current_row_mask) {
 			//var_12 = palette_buffer->
@@ -4200,6 +4647,9 @@ void set_chtab_palette(chtab_type* chtab, byte* colors, int n_colors) {
 			//printf("i=%d\n",i);
 			image_type* current_image = chtab->images[i];
 			if (current_image != NULL) {
+				// Native Macintosh images carry their intended COLOR palette per image.
+				// DOS guard/level palette swaps would corrupt those colors.
+				if (is_native_resolution_image(current_image)) continue;
 
 				int n_colors_to_be_set = n_colors;
 				SDL_Palette* current_palette = current_image->format->palette;

@@ -214,6 +214,15 @@ static int global_ini_callback(const char *section, const char *name, const char
 		process_boolean("always_use_original_music", &always_use_original_music);
 		process_boolean("always_use_original_graphics", &always_use_original_graphics);
 
+		if (strcasecmp(name, "graphics_pack") == 0) {
+			if (value[0] == '\0' || strcasecmp(value, "default") == 0) {
+				graphics_pack_name[0] = '\0';
+			} else {
+				snprintf_check(graphics_pack_name, sizeof(graphics_pack_name), "%s", value);
+			}
+			return 1;
+		}
+
 		if (strcasecmp(name, "gamecontrollerdb_file") == 0) {
 			if (value[0] != '\0') {
 				snprintf_check(gamecontrollerdb_file, sizeof(gamecontrollerdb_file), "%s", locate_file(value));
@@ -795,6 +804,11 @@ void load_mod_options() {
 				// It's a directory
 				ok = true;
 				snprintf_check(mod_data_path, sizeof(mod_data_path), "%s", located_folder_name);
+				// Does the mod bring its own graphics? (then it takes priority over the graphics pack)
+				char mod_data_dir_check[POP_MAX_PATH];
+				snprintf_check(mod_data_dir_check, sizeof(mod_data_dir_check), "%s/data", located_folder_name);
+				struct stat st_data;
+				mod_has_data_dir = (stat(mod_data_dir_check, &st_data) == 0 && S_ISDIR(st_data.st_mode));
 				// Try to load PRINCE.EXE (DOS)
 				load_dos_exe_modifications(located_folder_name);
 				// Try to load mod.ini
@@ -819,6 +833,7 @@ void load_mod_options() {
 		}
 		if (!ok) {
 			use_custom_levelset = 0;
+			mod_has_data_dir = false;
 			levelset_name[0] = '\0';
 		}
 	}

@@ -450,10 +450,14 @@ void check_chomped_kid() {
 
 // seg004:07BF
 void chomped() {
+	byte old_modifier = curr_room_modif[curr_tilepos];
 	#ifdef FIX_SKELETON_CHOMPER_BLOOD
 	if (!(fixes->fix_skeleton_chomper_blood && Char.charid == charid_4_skeleton))
 	#endif
 		curr_room_modif[curr_tilepos] |= 0x80; // put blood
+	/* Death adds blood after process_trobs(), so the pose-change check in
+	 * animate_tile() cannot observe this transition. Refresh native art now. */
+	mac_architecture_changed(curr_room, tiles_18_chomper, old_modifier, curr_room_modif[curr_tilepos]);
 	if (Char.frame != frame_178_chomped && Char.room == curr_room) {
 		#ifdef FIX_OFFSCREEN_GUARDS_DISAPPEARING
 		// a guard can get teleported to the other side of kid's room

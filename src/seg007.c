@@ -20,6 +20,32 @@ The authors of this program may be contacted at https://forum.princed.org
 
 #include "common.h"
 
+/* v12: Native architecture has transparent pixels and can extend beyond a
+ * DOS dirty tile. Recompose the buffered room on visible pose changes so old
+ * slices cannot survive. This changes only redraw scheduling, not animation
+ * modifiers, physics or timing. Neighbor rooms may contribute overhangs. */
+static int mac_architecture_visible(byte room) {
+	return uses_mac_native_full() && room &&
+	       (room == drawn_room || room == room_L || room == room_R ||
+	        room == room_A || room == room_B || room == room_AL ||
+	        room == room_AR || room == room_BL || room == room_BR);
+}
+
+void mac_architecture_changed(byte room, byte tile, byte old_modifier, byte modifier) {
+	if (!mac_architecture_visible(room)) return;
+	int changed = 0;
+	if (tile == tiles_4_gate) {
+		changed = MIN(old_modifier, 188) / 4 != MIN(modifier, 188) / 4;
+	} else if (tile == tiles_16_level_door_left) {
+		changed = old_modifier != modifier;
+	} else if (tile == tiles_18_chomper) {
+		static const byte frames[] = {3, 2, 0, 1, 4, 3, 3};
+		changed = frames[MIN(old_modifier & 0x7F, 6)] != frames[MIN(modifier & 0x7F, 6)] ||
+		          ((old_modifier ^ modifier) & 0x80);
+	}
+	if (changed) need_full_redraw = 1;
+}
+
 // seg007:0000
 void process_trobs() {
 	word need_delete = 0;
@@ -47,7 +73,9 @@ void process_trobs() {
 // seg007:00AF
 void animate_tile() {
 	get_room_address(trob.room);
-	switch (get_curr_tile(trob.tilepos)) {
+	byte tile = get_curr_tile(trob.tilepos);
+	byte old_modifier = curr_modifier;
+	switch (tile) {
 		case tiles_19_torch:
 		case tiles_30_torch_with_debris:
 			animate_torch();
@@ -85,6 +113,7 @@ void animate_tile() {
 		break;
 	}
 	curr_room_modif[trob.tilepos] = curr_modifier;
+	mac_architecture_changed(trob.room, tile, old_modifier, curr_modifier);
 }
 
 // seg007:0166
@@ -109,6 +138,10 @@ void set_redraw_anim_curr() {
 
 // seg007:019A
 void redraw_at_trob() {
+	/* Mirror appearance/removal can extend above the legacy tile wipe. */
+	if (mac_architecture_visible(trob.room) &&
+	    (curr_tile == tiles_13_mirror ||
+	     (curr_room_tiles[trob.tilepos] & 0x1F) == tiles_13_mirror)) need_full_redraw = 1;
 	redraw_height = 63;
 	word tilepos = get_trob_pos_in_drawn_room();
 	set_redraw_full(tilepos, 1);
@@ -123,7 +156,12 @@ void redraw_21h() {
 
 // seg007:01D0
 void redraw_11h() {
-	redraw_height = 0x11;
+	/* v11.2: Macintosh pressure-plate components extend a few native pixels
+	 * above the DOS 0x11 redraw band.  When a raise/drop button changes state,
+	 * the old top/right component can therefore survive the wipe and appear as
+	 * a doubled dark lip.  0x14 reaches the highest native plate pixels while
+	 * leaving every non-Mac renderer on the original 0x11 path. */
+	redraw_height = (uses_mac_native_full()) ? 0x14 : 0x11;
 	redraw_tile_height();
 }
 
@@ -332,7 +370,18 @@ void animate_spike() {
 			}
 		}
 	}
-	redraw_21h();
+	/* v11.1 Mac native spike sprites extend a few physical pixels above the
+	 * original DOS 0x21-logical-pixel wipe. During retraction those pixels
+	 * were outside the cleared band and survived as detached white spike tips.
+	 * Keep DOS behavior unchanged, but give Mac Native FULL a 0x25-high wipe
+	 * for both the spike tile and its right-neighbor component. Rendering only;
+	 * spike timing, modifier state and collision are untouched. */
+	if (uses_mac_native_full()) {
+		redraw_height = 0x25;
+		redraw_tile_height();
+	} else {
+		redraw_21h();
+	}
 }
 
 // data:27B2
@@ -458,6 +507,7 @@ Possible values of trob_type:
 						// Special event: place mirror
 						get_tile(/*4*/ custom->mirror_room, /*4*/ custom->mirror_column, /*0*/ custom->mirror_row);
 						curr_room_tiles[curr_tilepos] = /*tiles_13_mirror*/ custom->mirror_tile;
+						if (mac_architecture_visible(curr_room)) need_full_redraw = 1;
 					}
 				}
 			} else {
@@ -1090,6 +1140,11 @@ void loose_fall() {
 
 // seg007:132C
 void redraw_at_cur_mob() {
+	/* A linked room's native slab/debris edge can protrude into this view.
+	 * Its tile number is not a dirty-cell index in the drawn room; recompose
+	 * the visible native room on that change instead of leaving the old edge. */
+	if (curmob.room != drawn_room && mac_architecture_visible(curmob.room))
+		need_full_redraw = 1;
 	if (curmob.room == drawn_room) {
 		redraw_height = 0x20;
 		set_redraw_full(curr_tilepos, 1);

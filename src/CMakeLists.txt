@@ -71,6 +71,8 @@ set(SOURCE_FILES
         seg007.c
         seg008.c
         seg009.c
+        pak.c
+        pak.h
         seqtbl.c
         options.c
         midi.c opl3.c opl3.h

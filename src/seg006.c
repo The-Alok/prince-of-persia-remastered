@@ -19,6 +19,7 @@ The authors of this program may be contacted at https://forum.princed.org
 */
 
 #include "common.h"
+#include "mac_sword_table.h"
 
 #define SEQTBL_BASE 0x196E
 #define SEQTBL_0 (seqtbl - SEQTBL_BASE)
@@ -855,6 +856,8 @@ void reset_obj_clip() {
 	obj_clip_top = 0;
 	obj_clip_right = 320;
 	obj_clip_bottom = 192;
+	if (is_cutscene && uses_mac_native_full())
+		obj_clip_bottom = screen_rect.bottom;
 }
 
 // seg006:051C
@@ -1015,8 +1018,11 @@ void set_char_collision() {
 		char_width_half = 0;
 		char_height = 0;
 	} else {
-		char_width_half = (image->/*width*/w + 1) / 2;
-		char_height = image->/*height*/h;
+		/* The native Macintosh pack stores sprites at true 640x400 resolution.
+		 * Collision/physics still operate in the original 320x200 coordinate
+		 * system, so never feed physical 2x sprite dimensions into gameplay. */
+		char_width_half = (logical_image_width(image) + 1) / 2;
+		char_height = logical_image_height(image);
 	}
 	char_x_left = obj_x / 2 + 58;
 	if (Char.direction >= dir_0_right) {
@@ -1677,6 +1683,14 @@ void do_pickup(int obj_type) {
 	redraw_height = 35;
 	set_wipe(curr_tilepos, 1);
 	set_redraw_full(curr_tilepos, 1);
+	if (obj_type == -1 && curr_tilepos % 10 < 9 &&
+	    uses_mac_native_full()) {
+		/* The native floor sword extends into the next cell. Once this tile
+		 * becomes floor, its old sprite is no longer available to schedule
+		 * that edge restoration in the normal renderer dependency pass. */
+		set_wipe(curr_tilepos + 1, 1);
+		set_redraw_full(curr_tilepos + 1, 1);
+	}
 }
 
 // seg006:10E6
@@ -1766,8 +1780,14 @@ void clip_char() {
 #endif
 	// frames 217..228: going up the level door
 	if (frame >= frame_224_exit_stairs_8 && frame < 229) {
-		obj_clip_top = leveldoor_ybottom + 1;
-		obj_clip_right = leveldoor_right;
+		rect_type native_clip;
+		if (mac_get_leveldoor_clip(&native_clip)) {
+			obj_clip_top = native_clip.top;
+			obj_clip_right = native_clip.right;
+		} else {
+			obj_clip_top = leveldoor_ybottom + 1;
+			obj_clip_right = leveldoor_right;
+		}
 	} else {
 		if (
 			get_tile(room, char_col_left, char_top_row) == tiles_20_wall ||
@@ -2101,22 +2121,32 @@ const sword_table_type sword_tbl[] = {
 // seg006:1798
 void add_sword_to_objtable() {
 	short frame = Char.frame;
-	if ((frame >= frame_229_found_sword && frame < 238) || // found sword + put sword away
-		Char.sword != sword_0_sheathed ||
-		(Char.charid == charid_2_guard && Char.alive < 0)
-	) {
-		short sword_frame = cur_frame.sword & 0x3F;
-		if (sword_frame) {
-			obj_id = sword_tbl[sword_frame].id;
-			if (obj_id != 0xFF) {
-				obj_x = calc_screen_x_coord(obj_x);
-				obj_dx_forward(sword_tbl[sword_frame].x);
-				obj_y += sword_tbl[sword_frame].y;
-				obj_chtab = id_chtab_0_sword;
-				add_objtable(3); // sword
-			}
-		}
+	if (!((frame >= frame_229_found_sword && frame < 238) ||
+	      Char.sword != sword_0_sheathed ||
+	      (Char.charid == charid_2_guard && Char.alive < 0))) return;
+	short sword_frame = cur_frame.sword & 0x3F;
+	if (!sword_frame || sword_frame >= COUNT(sword_tbl)) return;
+	const int native = uses_mac_native_full();
+	const sword_table_type* attachment = &(native ? mac_sword_tbl : sword_tbl)[sword_frame];
+	obj_id = attachment->id;
+	if (obj_id == 0xFF) return;
+	/* Original Mac CODE 3:$5892..$58B0 converts the 280-wide body anchor
+	 * FIRST, then applies the native table's facing-relative screen offsets.
+	 * SHPD origins handle physical 640x400 placement in draw_mid(). The old
+	 * DOS table plus guessed per-frame nudges is superseded by recovered data.
+	 * Frame/body metadata independently matches all 282 original records. */
+	const short actor_x = obj_x;
+	obj_x = calc_screen_x_coord(obj_x);
+	obj_dx_forward(attachment->x);
+	obj_y += attachment->y;
+	obj_chtab = id_chtab_0_sword;
+	if (native && getenv("SDLPOP_MAC_ACTOR_DEBUG")) {
+		printf("MAC_ACTOR sword char=%d frame=%d sword_frame=%d mac_res=%d dir=%d "
+		       "actor_x280=%d attach_x320=%d attach_y=%d final_x320=%d final_y=%d source=MacDATA\n",
+		       Char.charid, frame, sword_frame, 701 + obj_id, Char.direction,
+		       actor_x, attachment->x, attachment->y, obj_x, obj_y);
 	}
+	add_objtable(3);
 }
 
 // seg006:1827

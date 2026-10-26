@@ -1,0 +1,2 @@
+5991170774800feb55d8962db40036c06188b01d3133b8dda7a7e6ef69d1857c  tools/mac_reference/legacy-packs/res_mac_native.pak
+3a386ced64ccb7c21b68873d30dbcd08fcabf54f2415f8a3b992fafb41d11ff0  data/res_mac_native_full.pak
