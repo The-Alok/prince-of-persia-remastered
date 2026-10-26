@@ -16,23 +16,25 @@ platform builds while retaining SDLPoP's gameplay foundation.
 
 ## Gameplay screenshots
 
-### Palace — Level 5
+### Mac Native FULL
 
-**Mac Native FULL — Macintosh gameplay**
+**Palace — Level 5**
 
 ![Mac Native FULL gameplay in the palace](doc/images/gameplay-mac.png)
 
-**Other included graphics packs — DOS, SNES 1, SNES 2 and SNES 3**
-
-![DOS and all three SNES packs in the same palace scene](doc/images/graphics-packs.png)
-
-### Dungeon — Level 1
-
-**Mac Native FULL — Macintosh gameplay**
+**Dungeon — Level 1**
 
 ![Mac Native FULL gameplay in the Level 1 dungeon](doc/images/gameplay-level1-mac.png)
 
-**Other included graphics packs — DOS, SNES 1, SNES 2 and SNES 3**
+### Other graphics packs
+
+Each grid shows **DOS, SNES 1, SNES 2 and SNES 3**, in that order.
+
+**Palace — Level 5**
+
+![DOS and all three SNES packs in the same palace scene](doc/images/graphics-packs.png)
+
+**Dungeon — Level 1**
 
 ![DOS and all three SNES packs in the same Level 1 dungeon scene](doc/images/graphics-packs-level1.png)
 
@@ -126,6 +128,13 @@ This repository is the home for this Macintosh port's rendering, graphics-pack,
 scaling, asset-loading and Windows/Linux build work. Report issues with your
 platform, graphics pack, level/room if known, facing direction and a screenshot
 or recording. Gameplay regressions observed in this version are welcome too.
+
+## AI assistance disclaimer
+
+This remaster was created with AI assistance from **ChatGPT and Codex**, including
+help with coding, debugging, testing and documentation. **The-Alok** directed
+development and playtested the game. Original game artwork and upstream code
+remain credited to their respective creators below.
 
 ## Credits and license
 
