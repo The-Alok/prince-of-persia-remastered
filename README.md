@@ -14,19 +14,58 @@ Macintosh sprites use their original native pixels and SHPD origins.
 The project focuses on this Macintosh presentation, its asset handling and
 platform builds while retaining SDLPoP's gameplay foundation.
 
+## Macintosh graphics: use your own disk
+
+The current source tree contains the SDLPoP-based port and extraction tools,
+but does **not bundle the Macintosh graphics PAK, extracted Macintosh sprites,
+application resource forks or pixel-reference fixtures**. Generate the optional
+Macintosh pack locally from your own Macintosh colour edition of Prince of
+Persia. The generated files are ignored by Git and excluded from new packages.
+
+**DOS and the three SNES packs remain bundled unchanged.** The engine source
+and those assets retain their separate provenance and licensing. The disk
+requirement applies to Macintosh graphics; this change does not establish
+redistribution rights for the other packs.
+
+Use a disk image from a copy you are entitled to use, containing the Macintosh
+colour application and `Persia(COLOR)` graphics file. Both `PoP1.hfs` and
+`PoP1.dsk` filenames are accepted: the importer detects raw classic HFS,
+Disk Copy 4.2 and Apple Partition Map formats from their contents. HFS+,
+compressed images and flux captures are not supported. A renamed file alone
+does not convert its format. No game files are downloaded or executed.
+
+Install Python 3.9 or newer, then run from the game folder:
+
+```sh
+# Linux
+python3 tools/build_mac_graphics_pack.py "/path/to/PoP1.dsk"
+# A raw .hfs volume works the same way:
+python3 tools/build_mac_graphics_pack.py "/path/to/PoP1.hfs"
+
+# Windows (with Python installed)
+py -3 tools/build_mac_graphics_pack.py "C:\Games\PoP1.hfs"
+```
+
+Run **one** command for your image. The importer writes
+`data/res_mac_native_full.pak`; restart the game and select **Mac Native FULL**
+in Settings → Visuals. No Pillow or other Python package is needed for this
+normal import. Existing identical output is reused; replacing a different pack
+requires an explicit `--force`. The input disk is opened read-only.
+
+Without an imported Mac pack, the game builds and runs with the bundled DOS
+and SNES packs. The INI prefers Macintosh when its generated pack is installed,
+and otherwise the selector starts with DOS. This change concerns Macintosh
+resource distribution; it does not guarantee copyright clearance. Documentation
+screenshots of the Mac pack are also kept out of the current source tree.
+
+**Historical release notice:** the previously published v1.0.0 downloads and
+older Git history still contain Macintosh assets until their separate cleanup
+is reviewed and completed. The import-only layout described here applies to
+the current source, not those historical archives.
+
 ## Gameplay screenshots
 
-### Mac Native FULL
-
-**Palace — Level 5**
-
-![Mac Native FULL gameplay in the palace](doc/images/gameplay-mac.png)
-
-**Dungeon — Level 1**
-
-![Mac Native FULL gameplay in the Level 1 dungeon](doc/images/gameplay-level1-mac.png)
-
-### Other graphics packs
+### DOS and SNES graphics packs
 
 Each grid shows **DOS, SNES 1, SNES 2 and SNES 3**, in that order.
 
@@ -65,8 +104,9 @@ build from source. Steam Deck compatibility has not been certified.
   interactive floor, gate, exit, mirror and chomper rendering.
 - Original-data sword attachment placement for the Prince and guard families.
 - Native cutscene composition, story-card colours, health flasks and RGB fades.
-- Five switchable graphics packs in this order: **Mac Native FULL v1.0.0**
-  (default), **DOS**, **SNES 1**, **SNES 2**, **SNES 3**.
+- Four bundled packs: **DOS**, **SNES 1**, **SNES 2**, **SNES 3**.
+- Optional locally generated **Mac Native FULL v1.0.0**, first in the menu
+  and preferred at startup when installed.
 
 SDLPoP gameplay, collision, animation timing and replay logic are preserved.
 
@@ -116,15 +156,32 @@ runtime DLL dependency closure, PNG codec and applicable SDL3 compatibility
 runtime. See its docstring for prerequisites. The exact source for release
 v1.0.0 is the [v1.0.0 tag](https://github.com/The-Alok/prince-of-persia-remastered/tree/v1.0.0).
 
-The renderer audit needs Python 3, Pillow and the built Linux objects:
+<details>
+<summary>Optional Macintosh renderer tests</summary>
+
+The format/safety tests do not require game assets:
 
 ```sh
+python3 tools/test_mac_disk_import.py
+```
+
+For image/renderer regression, install Pillow and generate private fixtures
+from your disk into the initially empty, Git-ignored `tools/mac_reference/`
+directory. This also generates the optional Mac pack:
+
+```sh
+python3 -m pip install Pillow
+python3 tools/build_mac_graphics_pack.py "/path/to/PoP1.dsk" \
+  --test-assets tools/mac_reference
+make -C src -j2 CC=/usr/bin/gcc
 python3 tools/mac_native_renderer/test_climb_overlay.py \
   --floors --architecture --palace --props --combat --world --ui --cutscenes
 ```
 
-Independent source-image fixtures used by the tests are included; the original
-Macintosh disk image and extracted application resources are not uploaded.
+Existing nonempty fixture directories are not overwritten. These local files
+contain extracted game resources and must not be committed or redistributed.
+
+</details>
 
 ## Issues and contributions
 
@@ -159,8 +216,8 @@ Graphics-pack integration is separate from authorship of the artwork:
 
 - **Mac Native FULL**: original Macintosh artwork and SHPD origins from the
   Macintosh game. This project's renderer does not claim authorship of that
-  artwork. Independent source-image fixtures used by the tests retain the
-  native Mac dimensions, transparency and origins recorded in their manifest.
+  artwork. Locally generated test fixtures retain the native Mac dimensions,
+  transparency and origins recorded in their generated manifest.
 - **SNES 1 / SNES 2**: based on the former SNES Alt pack, sourced from
   **Maurice Kaltofen (mk1995)**'s SNES-PC-set. SNES 1 additionally uses this
   project's Prince recolouring.

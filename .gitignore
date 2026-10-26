@@ -108,3 +108,17 @@ screenshots/
 /doc/checklist.txt
 /doc/internals_sequence-table.txt
 /doc/old_bugs.txt
+
+# Macintosh game resources are generated privately from the player's disk.
+/data/res_mac_native*.pak
+/data/res_mac_color*.pak
+/tools/mac_reference/
+/tools/mac_native_renderer/manifest.csv
+/tools/mac_color_port/build_report.json
+/MAC_NATIVE_SHA256SUMS.txt
+*.hfs
+*.dsk
+*.dc42
+*_macgroup*.png
+/doc/images/gameplay-mac.png
+/doc/images/gameplay-level1-mac.png

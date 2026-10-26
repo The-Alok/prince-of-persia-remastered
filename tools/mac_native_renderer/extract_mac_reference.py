@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Read-only extraction of the supplied raw classic-HFS disk and app palette.
+"""Read-only extraction of classic-HFS files and Macintosh resource forks.
 
-Supports forks fitting the three catalog extents; refuses overflow extents
-rather than emitting truncated files. No filesystem mounting is required.
+Raw HFS volumes, Apple Partition Maps and Disk Copy 4.2 containers are supported.
+No filesystem mounting or execution of the supplied game is required.
 """
 import argparse
 import hashlib
@@ -39,7 +39,45 @@ def leaf_records(tree):
         node = following
 
 
-def hfs_files(disk):
+def hfs_volume(image):
+    """Locate a classic HFS volume by structure, never by filename extension."""
+    if image[1024:1026] == b'BD':
+        return image
+    # Disk Copy 4.2: 84-byte header, then data and optional tag blocks.
+    if len(image) >= 84 and image[82:84] == b'\x01\x00' and image[0] <= 63:
+        size, tags = struct.unpack_from('>II', image, 64)
+        if 84 + size + tags != len(image):
+            raise ValueError('truncated or invalid Disk Copy 4.2 image')
+        volume = bounded(image, 84, size)
+        if volume[1024:1026] == b'BD':
+            return volume
+    # Apple Partition Map. The driver descriptor supplies the device block size.
+    block_size = struct.unpack_from('>H', image, 2)[0] if image[:2] == b'ER' else 512
+    if block_size < 512 or block_size > 65536 or block_size & (block_size - 1):
+        raise ValueError('invalid partition block size')
+    if image[block_size:block_size + 2] == b'PM':
+        count = struct.unpack_from('>I', bounded(image, block_size + 4, 4))[0]
+        if count < 1 or count > len(image) // block_size - 1:
+            raise ValueError('invalid Apple Partition Map length')
+        volumes = []
+        for index in range(1, count + 1):
+            part = bounded(image, index * block_size, 512)
+            if part[:2] != b'PM':
+                raise ValueError('invalid Apple Partition Map entry')
+            if part[48:80].rstrip(b'\0') == b'Apple_HFS':
+                start, size = struct.unpack_from('>II', part, 8)
+                volume = bounded(image, start * block_size, size * block_size)
+                if volume[1024:1026] == b'BD':
+                    volumes.append(volume)
+        if len(volumes) == 1:
+            return volumes[0]
+        if len(volumes) > 1:
+            raise ValueError('multiple HFS partitions; export the game volume as a raw .hfs image')
+    raise ValueError('no classic HFS volume found; use a raw .hfs/.dsk, Disk Copy 4.2 or Apple Partition Map image (not HFS+, compressed or flux images)')
+
+
+def hfs_files(disk, include=None):
+    disk = hfs_volume(disk)
     mdb = bounded(disk, 1024, 162)
     if mdb[:2] != b'BD':
         raise ValueError('expected an unwrapped classic HFS image')
@@ -48,16 +86,33 @@ def hfs_files(disk):
     if block_size < 512 or block_size % 512:
         raise ValueError('invalid HFS allocation block size')
 
-    def fork(size, raw_extents):
+    overflow = {}
+
+    def fork(size, raw_extents, file_id=None, fork_type=0):
         extents = struct.unpack('>6H', raw_extents)
         result = bytearray()
-        for block, count in zip(extents[::2], extents[1::2]):
-            result.extend(bounded(disk, allocation_start + block * block_size, count * block_size))
-        if len(result) < size:
-            raise ValueError('fork requires HFS overflow extents; extraction refused')
+        blocks = 0
+        while True:
+            for block, count in zip(extents[::2], extents[1::2]):
+                if count:
+                    result.extend(bounded(disk, allocation_start + block * block_size, count * block_size))
+                    blocks += count
+            if len(result) >= size:
+                break
+            extents = overflow.get((fork_type, file_id, blocks))
+            if extents is None or not any(extents[1::2]):
+                raise ValueError('missing HFS overflow extents; extraction refused')
         return bytes(result[:size])
 
-    catalog = fork(struct.unpack_from('>I', mdb, 146)[0], mdb[150:162])
+    overflow_size = struct.unpack_from('>I', mdb, 130)[0]
+    if overflow_size:
+        extents_tree = fork(overflow_size, mdb[134:146])
+        for raw in leaf_records(extents_tree):
+            if raw[0] != 7:
+                raise ValueError('invalid HFS overflow key')
+            fork_type, file_id, first_block = struct.unpack('>BIH', bounded(raw, 1, 7))
+            overflow[fork_type, file_id, first_block] = struct.unpack('>6H', bounded(raw, 8, 12))
+    catalog = fork(struct.unpack_from('>I', mdb, 146)[0], mdb[150:162], 4)
     directories = {}
     files = []
     for raw in leaf_records(catalog):
@@ -74,14 +129,17 @@ def hfs_files(disk):
             directories[struct.unpack_from('>I', record, 6)[0]] = (parent, name)
         elif record[0] == 2:
             bounded(record, 0, 102)
-            files.append({
+            file = {
                 'id': struct.unpack_from('>I', record, 20)[0],
                 'parent': parent, 'name': name,
                 'type': record[4:8].decode('mac_roman'),
                 'creator': record[8:12].decode('mac_roman'),
-                'data': fork(struct.unpack_from('>I', record, 26)[0], record[74:86]),
-                'rsrc': fork(struct.unpack_from('>I', record, 36)[0], record[86:98]),
-            })
+            }
+            if include is not None and not include(file):
+                continue
+            file['data'] = fork(struct.unpack_from('>I', record, 26)[0], record[74:86], file['id'])
+            file['rsrc'] = fork(struct.unpack_from('>I', record, 36)[0], record[86:98], file['id'], 255)
+            files.append(file)
     for file in files:
         components = [file['name']]
         parent, visited = file['parent'], set()

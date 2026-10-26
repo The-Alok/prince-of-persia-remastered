@@ -19,8 +19,8 @@ from extract_mac_reference import resource_entries
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def recover():
-    fork = ROOT / 'tools/mac_reference/hfs-forks/Prince of Persia__Prince of Persia.rsrc'
+def recover(reference=ROOT / 'tools/mac_reference'):
+    fork = reference / 'hfs-forks/Prince of Persia__Prince of Persia.rsrc'
     resources = resource_entries(fork.read_bytes())
     below = struct.unpack_from('>I', resources['CODE', 0]['data'], 4)[0]
     data, zero = (resources[k, 0]['data'] for k in ('DATA', 'ZERO'))
@@ -72,10 +72,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, default=ROOT / 'tools/mac_reference/combat-oracle')
     parser.add_argument('--header', type=Path)
+    parser.add_argument('--source', type=Path, default=ROOT / 'tools/mac_reference/source-images')
+    parser.add_argument('--reference', type=Path, default=ROOT / 'tools/mac_reference')
     args = parser.parse_args()
-    fork, table, frames = recover()
+    fork, table, frames = recover(args.reference)
     args.output.mkdir(parents=True, exist_ok=True)
-    source = ROOT.parent / 'Mac-Color-Native-Graphics'
+    source = args.source
     rows = {(r['folder'], int(r['resource_id'])): r for r in csv.DictReader((source / 'manifest.csv').open())}
     cases = []
     absent = []

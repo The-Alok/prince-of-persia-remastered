@@ -33,10 +33,6 @@ def main():
     args = parser.parse_args()
     if not re.fullmatch(r'\d+\.\d+\.\d+', VERSION):
         raise SystemExit('Expected a public semantic release version.')
-    for line in (ROOT/'MAC_NATIVE_SHA256SUMS.txt').read_text().splitlines():
-        expected, relative = line.split(maxsplit=1)
-        if digest((ROOT/relative).read_bytes()) != expected:
-            raise SystemExit(f'Native pack checksum failed: {relative}')
     if 'graphics_pack = mac_native_full' not in (ROOT/'SDLPoP.ini').read_text():
         raise SystemExit('Native FULL must be the startup default.')
     contents = {}
@@ -50,15 +46,33 @@ def main():
     # enter downloads merely because they still exist in the working tree.
     for name in ('SDLPoP.ini', 'COPYING', 'README.md'):
         add(ROOT/name)
-    for image in (ROOT/'doc/images').glob('*.png'):
-        add(image)
-    for folder in ('data', 'mods', 'replays'):
-        for path in (ROOT/folder).rglob('*'):
-            if path.is_file() and path.suffix.lower() not in ('.sav', '.p1r', '.cfg'):
-                add(path)
+    for name in ('graphics-packs.png', 'graphics-packs-level1.png', 'welcome.png'):
+        add(ROOT/'doc/images'/name)
+    # Ship the importer, never the player's generated Macintosh pack or dumps.
+    for name in ('tools/build_mac_graphics_pack.py',
+                 'tools/mac_native_renderer/extract_mac_reference.py',
+                 'tools/mac_color_port/decode_mac_pop_reference.py'):
+        add(ROOT/name)
+    # A checked inventory prevents local Mac imports/dumps (or user mods) from
+    # leaking into an archive, even if they sit beside the bundled resources.
+    for line in (ROOT/'tools/release/bundled_data.sha256').read_text().splitlines():
+        if not line or line.startswith('#'):
+            continue
+        expected, relative = line.split(maxsplit=1)
+        path = ROOT/relative
+        if not path.resolve().is_relative_to((ROOT/'data').resolve()):
+            raise SystemExit(f'Invalid bundled-data path: {relative}')
+        if path.name.startswith(('res_mac_native', 'res_mac_color')) or '_macgroup' in path.name:
+            raise SystemExit(f'Macintosh import cannot be bundled: {relative}')
+        if digest(path.read_bytes()) != expected:
+            raise SystemExit(f'Bundled DOS/SNES data changed: {relative}')
+        add(path)
+    for name in ('mods/mods.txt', 'replays/replays.txt'):
+        add(ROOT/name)
     metadata = {'version': VERSION, 'platform': f'{args.platform}-x86_64', 'source': SOURCE_URL,
                 'upstream': 'https://github.com/NagyD/SDLPoP',
                 'graphics_reference': 'https://github.com/chanunnaki/SDLPoP-PSP',
+                'macintosh_graphics': 'not bundled; generate locally from your own Macintosh colour-game disk',
                 'live_full_game_and_steam_deck_tests': 'pending; see README.md#validation-limits'}
     if args.platform == 'linux':
         if platform.system() != 'Linux' or platform.machine() != 'x86_64':
