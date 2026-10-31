@@ -32,7 +32,7 @@ The authors of this program may be contacted at https://forum.princed.org
 
 #define SDLPOP_VERSION "1.24 RC"
 #define REMASTERED_NAME "Prince of Persia Remastered"
-#define REMASTERED_VERSION "1.0.1"
+#define REMASTERED_VERSION "1.0.2"
 #define WINDOW_TITLE REMASTERED_NAME " - v" REMASTERED_VERSION
 
 #if ! (defined WIN32 || _WIN32 || WIN64 || _WIN64)

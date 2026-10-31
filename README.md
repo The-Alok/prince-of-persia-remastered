@@ -1,6 +1,6 @@
-# Prince of Persia Remastered v1.0.1
+# Prince of Persia Remastered v1.0.2
 
-**A Macintosh HD graphics port for Windows and Linux, with a custom native
+**A Macintosh HD graphics port for Windows, Linux and macOS, with a custom native
 640×400 renderer and 2× high-resolution sprite support.**
 
 Prince of Persia Remastered is an independent, unofficial fan project maintained
@@ -84,32 +84,32 @@ the optional Macintosh pack alongside the other graphics options.
 
 **Historical release notice:** the older v1.0.0 downloads and Git history
 contain Macintosh assets. Cleanup of those older copies remains a separate
-review; v1.0.1 generates its optional Macintosh pack locally from your own copy.
+review; v1.0.2 generates its optional Macintosh pack locally from your own copy.
 
-## Download v1.0.1
+## Download v1.0.2
 
-[Release notes and downloads](https://github.com/The-Alok/prince-of-persia-remastered/releases/tag/v1.0.1)
-include automatic Macintosh setup, HQX/SIT/ISO import, direct startup after
-setup, F7/F8 display controls and corrected brick layering while falling.
+[Release notes and downloads](https://github.com/The-Alok/prince-of-persia-remastered/releases/tag/v1.0.2)
+will include Windows, Linux and Apple Silicon macOS downloads.
 
 | Platform | Download | Start |
 | --- | --- | --- |
-| Windows x64 | [Windows ZIP](https://github.com/The-Alok/prince-of-persia-remastered/releases/download/v1.0.1/prince-of-persia-remastered-v1.0.1-windows-x86_64.zip) | Extract everything, then double-click `prince.exe` |
-| Linux x64 | [Linux tar.gz](https://github.com/The-Alok/prince-of-persia-remastered/releases/download/v1.0.1/prince-of-persia-remastered-v1.0.1-linux-x86_64.tar.gz) | Extract, then run `./launch.sh` or `./prince` |
+| Windows x64 | [Windows ZIP](https://github.com/The-Alok/prince-of-persia-remastered/releases/download/v1.0.2/prince-of-persia-remastered-v1.0.2-windows-x86_64.zip) | Extract everything, then double-click `prince.exe` |
+| Linux x64 | [Linux tar.gz](https://github.com/The-Alok/prince-of-persia-remastered/releases/download/v1.0.2/prince-of-persia-remastered-v1.0.2-linux-x86_64.tar.gz) | Extract, then run `./launch.sh` or `./prince` |
+| macOS Apple Silicon | [macOS DMG](https://github.com/The-Alok/prince-of-persia-remastered/releases/download/v1.0.2/prince-of-persia-remastered-v1.0.2-macos-arm64.dmg) | Open the DMG and drag the app into Applications |
 
-[SHA-256 checksums](https://github.com/The-Alok/prince-of-persia-remastered/releases/download/v1.0.1/SHA256SUMS-v1.0.1.txt)
-are provided for both downloads.
+[SHA-256 checksums](https://github.com/The-Alok/prince-of-persia-remastered/releases/download/v1.0.2/SHA256SUMS-v1.0.2.txt)
+will be provided for the downloads.
 
 Windows includes the required SDL runtime DLLs; keep them beside `prince.exe`.
-Linux uses the system SDL2 and SDL2_image libraries. On Debian/Ubuntu:
+Linux uses system SDL2 and SDL2_image libraries. On Debian/Ubuntu:
 
 ```sh
 sudo apt install libsdl2-2.0-0 libsdl2-image-2.0-0
 ```
 
-The Linux binary's exact glibc/library requirements are recorded in its
-`BUILD_INFO.json`. This build requires glibc 2.38 or newer. On older systems,
-build from source. Steam Deck compatibility has not been certified.
+The Linux tarball's exact glibc/library requirements are recorded in its
+`BUILD_INFO.json`. This build requires glibc 2.38 or newer. Steam Deck
+compatibility has not been certified.
 
 ## What this version adds
 
@@ -119,7 +119,7 @@ build from source. Steam Deck compatibility has not been certified.
 - Original-data sword attachment placement for the Prince and guard families.
 - Native cutscene composition, story-card colours, health flasks and RGB fades.
 - Four bundled packs: **DOS**, **SNES 1**, **SNES 2**, **SNES 3**.
-- Optional locally generated **Mac Native FULL v1.0.1**, first in the menu
+- Optional locally generated **Mac Native FULL v1.0.2**, first in the menu
   and preferred at startup when installed.
 
 F7 cycles picture shaders: **Pixel** (nearest-neighbour), **Sharp** (crisp
