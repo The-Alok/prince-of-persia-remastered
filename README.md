@@ -8,6 +8,20 @@ by [The-Alok](https://github.com/The-Alok). It brings the original Macintosh
 colour artwork, sprite origins and scene composition to a modified version of
 [SDLPoP by Dávid Nagy and contributors](https://github.com/NagyD/SDLPoP).
 
+## Quick controls
+
+- Arrow keys: move, jump/climb and crouch.
+- Shift: grab, careful steps and sword action.
+- Esc: menu/settings; F6/F9: quicksave/quickload.
+- Ctrl+Tab: record a replay; Tab on the title screen: replay browser.
+- **F7**: cycle picture shaders — Pixel → Sharp → Soft → Smooth HQ.
+- **F8**: cycle installed graphics packs while playing or paused.
+- Alt+Enter: fullscreen toggle.
+
+Edit `SDLPoP.ini` or use Settings → Visuals. The default remains
+`graphics_pack = mac_native_full`. Internal pack IDs are retained for
+compatibility even though the three SNES menu labels were renamed.
+
 ## Gameplay screenshots
 
 ### Mac Native FULL
@@ -132,19 +146,6 @@ do not skip story screens, advance animation or change movement/collision.
 SDLPoP gameplay, collision, animation timing and replay logic are preserved.
 
 
-## Quick controls
-
-- Arrow keys: move, jump/climb and crouch.
-- Shift: grab, careful steps and sword action.
-- Esc: menu/settings; F6/F9: quicksave/quickload.
-- Ctrl+Tab: record a replay; Tab on the title screen: replay browser.
-- **F7**: cycle picture shaders — Pixel → Sharp → Soft → Smooth HQ.
-- **F8**: cycle installed graphics packs while playing or paused.
-- Alt+Enter: fullscreen toggle.
-
-Edit `SDLPoP.ini` or use Settings → Visuals. The default remains
-`graphics_pack = mac_native_full`. Internal pack IDs are retained for
-compatibility even though the three SNES menu labels were renamed.
 
 ## Build from source
 
