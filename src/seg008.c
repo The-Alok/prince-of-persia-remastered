@@ -539,7 +539,11 @@ static void mac_draw_left_other_overhang(void) {
 			break;
 		case tiles_20_wall:
 			if (mac_is_palace() && !(modifier_left & 0x80)) {
-				mac_add_back_exact(id_chtab_6_environment, 0x54, 0x18, -0x1B, blitters_10h_transp);
+				/* The native palace wall uses the registered floor-top anchor.
+				 * Keeping the legacy DOS baseline here leaves the blue trim low
+				 * against the wall course, most visibly on lower room rows. */
+				mac_add_back_exact(id_chtab_6_environment, 0x54, 0x18,
+				                   MAC_FLOOR_TOP_ANCHOR - 0x1B, blitters_10h_transp);
 			}
 			mac_add_back_exact(id_chtab_7_environmentwall, 1, 0, MAC_FLOOR_TOP_ANCHOR + pc->right_y, blitters_10h_transp);
 			break;

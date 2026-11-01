@@ -39,7 +39,7 @@ void fix_sound_priorities(void);
 // seg000:0000
 void pop_main() {
 	if (check_param("--version") || check_param("-v")) {
-		printf("%s v%s\nBased on SDLPoP v%s\n", REMASTERED_NAME, REMASTERED_VERSION, SDLPOP_VERSION);
+		printf("%s v%s\n", REMASTERED_NAME, REMASTERED_VERSION);
 		exit(0);
 	}
 
@@ -681,7 +681,7 @@ int process_key() {
 		break;
 		case SDL_SCANCODE_V | WITH_CTRL: // Ctrl+V
 			//answer_text = "PRINCE OF PERSIA  V1.0";
-			snprintf(sprintf_temp, sizeof(sprintf_temp), "SDLPoP v%s\n", SDLPOP_VERSION);
+			snprintf(sprintf_temp, sizeof(sprintf_temp), "%s v%s\n", REMASTERED_NAME, REMASTERED_VERSION);
 			answer_text = sprintf_temp;
 			need_show_text = 1;
 		break;
@@ -2533,7 +2533,7 @@ const char* splash_text_2 =
 #endif
 		"\n"
 		"Read README.md for this version.\n"
-		"Built on SDLPoP " SDLPOP_VERSION ".\n"
+		"Open-source engine by David Nagy and contributors.\n"
 		"\n"
 		"Press any key to continue...";
 

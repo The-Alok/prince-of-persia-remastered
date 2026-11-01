@@ -1,12 +1,18 @@
 cmake_minimum_required(VERSION 2.8)
-project(SDLPoP)
+project(PrinceOfPersiaRemastered)
+
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/config.h" REMASTERED_VERSION_LINE
+     REGEX "^#define REMASTERED_VERSION")
+string(REGEX MATCH "\"([0-9]+\\.[0-9]+\\.[0-9]+)\"" REMASTERED_VERSION_MATCH
+       "${REMASTERED_VERSION_LINE}")
+set(REMASTERED_VERSION "${CMAKE_MATCH_1}")
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -std=c99")
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror=implicit-function-declaration")
 
 # have CMake output binaries to the directory that contains the source files
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${SDLPoP_SOURCE_DIR}/..")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PrinceOfPersiaRemastered_SOURCE_DIR}/..")
 
 # SDLPoP requires the SDL2 and SDL2_image development libraries.
 # You can pass the SDL2 location to CMake like so: -DSDL2="C:/work/libraries/SDL2-2.0.8"
@@ -89,7 +95,7 @@ set(SOURCE_FILES
 if (NOT(APPLE AND CREATE_BUNDLE))
     if(NOT PSP)
         add_executable(prince-engine ${SOURCE_FILES})
-        set_target_properties(prince-engine PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${SDLPoP_SOURCE_DIR}/../runtime")
+        set_target_properties(prince-engine PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PrinceOfPersiaRemastered_SOURCE_DIR}/../runtime")
         add_executable(prince launcher.c mac_asset_import.c mac_archive.c icon.rc)
     else()
         add_executable(prince ${SOURCE_FILES})
@@ -103,15 +109,14 @@ else()
     # NOTE: Currently, the SDL2 and SDL2_image frameworks are not being correctly included/linked in the bundle!
     #       As long as this isn't fixed, these bundles will only work if SDL2 and SDL2_image are installed.
 
-    set (SDLPoP_VERSION "1.24 RC")
-    set (MACOSX_BUNDLE_INFO_STRING          ${PROJECT_NAME})
+    set (MACOSX_BUNDLE_INFO_STRING          "Prince of Persia Remastered")
     set (MACOSX_BUNDLE_ICON_FILE            "icon.icns")
     set_source_files_properties(${MACOSX_BUNDLE_ICON_FILE} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
-    set (MACOSX_BUNDLE_GUI_IDENTIFIER       "org.princed.SDLPoP")
-    set (MACOSX_BUNDLE_LONG_VERSION_STRING  ${SDLPoP_VERSION})
-    set (MACOSX_BUNDLE_BUNDLE_NAME          "SDLPoP")
-    set (MACOSX_BUNDLE_SHORT_VERSION_STRING ${SDLPoP_VERSION})
-    set (MACOSX_BUNDLE_BUNDLE_VERSION       ${SDLPoP_VERSION})
+    set (MACOSX_BUNDLE_GUI_IDENTIFIER       "org.princeremastered.mac")
+    set (MACOSX_BUNDLE_LONG_VERSION_STRING  ${REMASTERED_VERSION})
+    set (MACOSX_BUNDLE_BUNDLE_NAME          "Prince of Persia Remastered")
+    set (MACOSX_BUNDLE_SHORT_VERSION_STRING ${REMASTERED_VERSION})
+    set (MACOSX_BUNDLE_BUNDLE_VERSION       ${REMASTERED_VERSION})
     set (MACOSX_BUNDLE_COPYRIGHT            "GNU General Public Licence, v3")
     add_executable(prince MACOSX_BUNDLE ${SOURCE_FILES} ${MACOSX_BUNDLE_ICON_FILE})
     add_custom_command(TARGET prince POST_BUILD

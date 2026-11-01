@@ -1,7 +1,7 @@
 [Desktop Entry]
 Encoding=UTF-8
-Name=SDLPoP
-Comment=An open-source port of Prince of Persia
+Name=Prince of Persia Remastered
+Comment=Classic Prince of Persia with Macintosh HD graphics
 StartupNotify=false
 Exec=$ROOT/prince
 Icon=$ROOT/data/icon.png

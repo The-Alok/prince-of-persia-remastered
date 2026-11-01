@@ -337,7 +337,7 @@ setting_type general_settings[] = {
 						"If disabled, you can still bring up the menu by pressing Backspace."},
 		{.id = SETTING_ENABLE_INFO_SCREEN, .style = SETTING_STYLE_TOGGLE, .linked = &enable_info_screen,
 				.text = "Display info screen on launch",
-				.explanation = "Display the SDLPoP information screen when the game starts."},
+				.explanation = "Display the Prince of Persia Remastered information screen when the game starts."},
 		{.id = SETTING_ENABLE_SOUND, .style = SETTING_STYLE_TOGGLE, .linked = &is_sound_on,
 				.text = "Enable sound",
 				.explanation = "Turn sound on or off."},
@@ -1307,7 +1307,7 @@ void pause_menu_clicked(pause_menu_item_type* item) {
 			break;
 		case PAUSE_MENU_QUIT_GAME:
 			current_dialog_box = DIALOG_CONFIRM_QUIT;
-			current_dialog_text = "Quit SDLPoP?";
+			current_dialog_text = "Quit Prince of Persia Remastered?";
 			break;
 		case SETTINGS_MENU_GENERAL:
 		case SETTINGS_MENU_GAMEPLAY:

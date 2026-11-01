@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later. See COPYING.
  * UI artwork is drawn here; no Macintosh game images are embedded. */
 #include <SDL.h>
+#include <SDL_image.h>
 #include "config.h"
 #include "mac_asset_import.h"
 #include <stdio.h>
@@ -138,7 +139,7 @@ static void select_disk(Launcher *a,const char *path) {
     char *copy=SDL_strdup(path);
     if(!copy)return;
     free(a->disk);a->disk=copy;a->disk_found=readable(copy);
-    if(!a->disk_found){SDL_strlcpy(a->message,"Cannot read that image. Choose a file from your Macintosh colour game.",sizeof(a->message));return;}
+    if(!a->disk_found){SDL_strlcpy(a->message,"That file cannot be read. Choose an image or archive from the Macintosh COLOR edition.",sizeof(a->message));return;}
     remember(a);
     if(a->ready){SDL_strlcpy(a->message,"Your graphics are ready. Press Play to start.",sizeof(a->message));return;}
     a->job.disk=a->disk;a->job.pack=a->pack;a->job.success=0;SDL_AtomicSet(&a->job.done,0);
@@ -174,14 +175,14 @@ static void choose_path(Launcher *a) {
     struct stat st;if(stat(a->path_input,&st)){SDL_strlcpy(a->browser_message,"File not found. Choose a folder or paste the image path.",sizeof(a->browser_message));return;}
     if(S_ISDIR(st.st_mode))open_directory(a,a->path_input);
     else if(S_ISREG(st.st_mode)){a->browse=0;SDL_StopTextInput();select_disk(a,a->path_input);}
-    else SDL_strlcpy(a->browser_message,"Choose a disk image file.",sizeof(a->browser_message));
+    else SDL_strlcpy(a->browser_message,"Choose HFS, DSK, DC42, ISO, HQX or SIT game image.",sizeof(a->browser_message));
 }
 #else
 static wchar_t *wide(const char *s){int n=MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,s,-1,NULL,0);wchar_t*w=n?malloc(n*sizeof(*w)):NULL;if(w)MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,s,-1,w,n);return w;}
 static void browse(Launcher *a) {
     wchar_t file[32768]={0};OPENFILENAMEW dialog;SDL_zero(dialog);dialog.lStructSize=sizeof(dialog);
     SDL_SysWMinfo info;SDL_VERSION(&info.version);if(SDL_GetWindowWMInfo(a->window,&info))dialog.hwndOwner=info.info.win.window;
-    dialog.lpstrFile=file;dialog.nMaxFile=32768;dialog.lpstrTitle=L"Choose your Macintosh Prince of Persia disk image";
+    dialog.lpstrFile=file;dialog.nMaxFile=32768;dialog.lpstrTitle=L"Prince of Persia Remastered - Choose Macintosh COLOR Edition image";
     dialog.lpstrFilter=L"Macintosh game images and archives\0*.hfs;*.dsk;*.dc42;*.iso;*.hqx;*.sit\0All files\0*.*\0\0";
     dialog.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST|OFN_NOCHANGEDIR|OFN_EXPLORER;
     if(GetOpenFileNameW(&dialog)) {
@@ -207,24 +208,29 @@ static void draw(Launcher *a) {
             text(r,48,y+8,2,item->directory?"+":" ",item->directory?gold:green);
             char name[57];SDL_strlcpy(name,item->name,sizeof(name));text(r,72,y+8,2,name,item->directory?ink:green);
         }
-        if(!a->count)text(r,44,240,2,"NO DISK IMAGES HERE. OPEN A FOLDER ABOVE.",muted);
+        if(!a->count)text(r,44,240,2,"NO SUPPORTED FILES HERE. OPEN ANOTHER FOLDER.",muted);
         fill(r,(SDL_Rect){36,474,600,36},(SDL_Color){9,14,25,255});
         const char *input=a->path_input;len=strlen(input);if(len>47)input+=len-47;text(r,44,485,2,input,ink);
         button(a,(SDL_Rect){648,474,116,36},"OPEN",1,1);
-        text(r,38,529,1,a->browser_message[0]?a->browser_message:"SCROLL TO BROWSE. TYPE OR PASTE A PATH. ENTER TO OPEN. ESC TO CANCEL.",a->browser_message[0]?red:muted);
+        text(r,38,529,1,a->browser_message[0]?a->browser_message:"TYPES: HFS, DSK, DC42, ISO, HQX, SIT. SCROLL OR TYPE/PASTE A PATH. ENTER OPENS. ESC CANCELS.",a->browser_message[0]?red:muted);
     } else {
         text(r,36,116,2,"MACINTOSH GRAPHICS SETUP",gold);
         led(r,49,169,a->disk_found);text(r,70,162,2,a->disk_found?"DISK IMAGE FOUND":"NO DISK IMAGE SELECTED",ink);
         led(r,49,208,a->ready);text(r,70,201,2,a->ready?"GRAPHICS READY":a->worker?"PREPARING GRAPHICS...":"GRAPHICS NOT PREPARED",ink);
         fill(r,(SDL_Rect){36,244,728,50},(SDL_Color){9,15,27,255});
-        char name[57];SDL_strlcpy(name,a->disk?filename(a->disk):"COPY POP1.HFS OR POP1.DSK BESIDE THE GAME",sizeof(name));
+        char name[57];SDL_strlcpy(name,a->disk?filename(a->disk):"USE BROWSE OR COPY AN IMAGE BESIDE THE GAME",sizeof(name));
         text(r,50,262,2,name,a->disk?ink:muted);
         button(a,(SDL_Rect){36,311,224,42},"BROWSE FOR IMAGE",0,!a->worker);
         if(a->worker){int x=36+(SDL_GetTicks()/8)%660;fill(r,(SDL_Rect){36,373,728,4},(SDL_Color){38,50,72,255});fill(r,(SDL_Rect){x,373,68,4},gold);}
         wrapped(r,38,392,720,a->message,a->ready?green:muted);
         button(a,(SDL_Rect){36,481,224,44},"PLAY DOS MODE",0,!a->worker);
         button(a,(SDL_Rect){540,476,224,54},"PLAY",1,a->ready&&!a->worker);
-        text(r,38,544,1,"YOUR DISK IS READ ONLY. GRAPHICS ARE PREPARED ONCE.",muted);
+        if(a->ready) {
+            text(r,38,532,1,"YOUR SOURCE IMAGE WAS NOT CHANGED. GRAPHICS ARE SAVED LOCALLY.",muted);
+        } else {
+            text(r,38,524,1,"SUPPORTED: HFS, DSK, DC42, ISO, HQX AND SIT. MACINTOSH COLOR EDITION REQUIRED.",muted);
+            text(r,38,541,1,"THE SOURCE IMAGE IS NOT CHANGED. GENERATED GRAPHICS STAY IN THE GAME DATA FOLDER.",muted);
+        }
     }
     SDL_RenderPresent(r);
 }
@@ -294,11 +300,16 @@ int main(int argc,char **argv) {
     if(mac_import_pack_status(a.pack)==1){int result=launch_engine(&a,1,argv,NULL);free(a.pack);free(a.config);SDL_free(a.base);return result?0:1;}
     if(SDL_Init(SDL_INIT_VIDEO|SDL_INIT_TIMER)){free(a.pack);free(a.config);SDL_free(a.base);return 1;}
     a.window=SDL_CreateWindow(REMASTERED_NAME " - Launcher",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,W,H,SDL_WINDOW_ALLOW_HIGHDPI|SDL_WINDOW_RESIZABLE);
+    char *icon_path=join(a.base,"data/icon.png");
+    SDL_Surface *icon=icon_path?IMG_Load(icon_path):NULL;
+    if(a.window&&icon)SDL_SetWindowIcon(a.window,icon);
+    if(icon)SDL_FreeSurface(icon);
+    free(icon_path);
     a.renderer=a.window?SDL_CreateRenderer(a.window,-1,SDL_RENDERER_SOFTWARE):NULL;
     if(!a.renderer){SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,REMASTERED_NAME,"Could not open the launcher window.",a.window);if(a.window)SDL_DestroyWindow(a.window);SDL_Quit();free(a.pack);free(a.config);SDL_free(a.base);return 1;}
     SDL_RenderSetLogicalSize(a.renderer,W,H);
     int status=mac_import_pack_status(a.pack);a.ready=status==1;
-    SDL_strlcpy(a.message,a.ready?"Your Macintosh graphics are ready. Press Play to start.":"Copy your game disk image beside this launcher, or use Browse. Graphics will be prepared automatically.",sizeof(a.message));
+    SDL_strlcpy(a.message,a.ready?"Your Macintosh graphics are ready. Press Play to start.":"Choose a disk image or archive from the Macintosh COLOR edition of Prince of Persia. Supported: HFS, DSK, DC42, ISO, HQX and SIT. Use Browse or copy it beside the game.",sizeof(a.message));
     if(status<0)SDL_strlcpy(a.message,"The saved graphics file is damaged. Move data/res_mac_native_full.pak out of the game folder, then reopen the launcher.",sizeof(a.message));
     char *found=NULL;int images=mac_import_find_disk(a.base,&found);
     if(images==1&&found){if(status<0){a.disk=found;a.disk_found=1;}else{select_disk(&a,found);free(found);}}
@@ -306,7 +317,7 @@ int main(int argc,char **argv) {
         free(found);char saved[PATH_CAP]={0};SDL_RWops *f=SDL_RWFromFile(a.config,"rb");
         if(f){size_t n=SDL_RWread(f,saved,1,sizeof(saved)-1);saved[n]=0;SDL_RWclose(f);}
         if(readable(saved)){if(status<0){a.disk=SDL_strdup(saved);a.disk_found=1;}else select_disk(&a,saved);}
-        else if(images>1)SDL_strlcpy(a.message,"Several disk images were found. Use Browse to choose your Macintosh colour game image.",sizeof(a.message));
+        else if(images>1)SDL_strlcpy(a.message,"Several supported files were found. Use Browse to choose one from the Macintosh COLOR edition.",sizeof(a.message));
     }
     int play=0;
     while(a.running) {

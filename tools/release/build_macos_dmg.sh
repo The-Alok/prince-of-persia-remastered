@@ -7,7 +7,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 [[ "$(uname -s)" == Darwin ]] || { echo "Run this on macOS." >&2; exit 1; }
 [[ "$(uname -m)" == arm64 ]] || { echo "Build on Apple Silicon (arm64)." >&2; exit 1; }
-for tool in make clang pkg-config brew dylibbundler hdiutil codesign; do
+for tool in make clang pkg-config brew dylibbundler hdiutil codesign strings; do
     command -v "$tool" >/dev/null || { echo "Missing $tool. Install Xcode Command Line Tools and Homebrew dependencies first." >&2; exit 1; }
 done
 pkg-config --exists sdl2 SDL2_image || { echo "Install SDL2 and SDL2_image with Homebrew." >&2; exit 1; }
@@ -30,7 +30,7 @@ trap 'rm -rf "$STAGE"' EXIT
 APP="$STAGE/Prince of Persia Remastered.app"
 CONTENTS="$APP/Contents"
 GAME="$CONTENTS/Resources/game"
-FRAMEWORKS="$CONTENTS/Frameworks"
+FRAMEWORKS="$GAME/Frameworks"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources" "$GAME/runtime" "$GAME/data" "$GAME/mods" "$GAME/replays" "$FRAMEWORKS"
 cp prince "$GAME/prince"
 cp runtime/prince-engine "$GAME/runtime/prince-engine"
@@ -71,6 +71,7 @@ mkdir -p "$DST"
 rsync -a --ignore-existing "$SRC/" "$DST/"
 rsync -a "$SRC/prince" "$DST/prince"
 rsync -a "$SRC/runtime/" "$DST/runtime/"
+rsync -a "$SRC/Frameworks/" "$DST/Frameworks/"
 rsync -a "$SRC/data/" "$DST/data/"
 cd "$DST"
 exec ./prince
@@ -97,11 +98,34 @@ PLIST
 
 # Bundle Homebrew SDL and its recursive dylib dependencies so players need no
 # compiler or Homebrew installation. The game's data files are not touched.
+# Put the libraries inside the copied game tree. The runtime symlink makes the
+# same @executable_path/Frameworks install names work for both executables.
+ln -s ../Frameworks "$GAME/runtime/Frameworks"
 for executable in "$GAME/prince" "$GAME/runtime/prince-engine"; do
-    dylibbundler -b -of -x "$executable" -d "$FRAMEWORKS" -p '@executable_path/../../Frameworks/'
+    dylibbundler -b -of -x "$executable" -d "$FRAMEWORKS" -p '@executable_path/Frameworks/'
 done
-if otool -L "$GAME/prince" "$GAME/runtime/prince-engine" | grep -E '/opt/homebrew/|/usr/local/opt/' >/dev/null; then
-    echo "A Homebrew dylib was not bundled into the app." >&2
+# Homebrew's SDL2 compatibility build uses dlopen for SDL3, so SDL3 is not
+# visible to otool -L or dylibbundler's dependency scan. Bundle it explicitly.
+if strings "$FRAMEWORKS/libSDL2-2.0.0.dylib" | grep -F 'Failed loading SDL3 library.' >/dev/null; then
+    SDL3_SOURCE="$(brew --prefix sdl3)/lib/libSDL3.dylib"
+    [[ -f "$SDL3_SOURCE" ]] || { echo "SDL2-compat needs SDL3, but libSDL3.dylib was not found." >&2; exit 1; }
+    cp -L "$SDL3_SOURCE" "$FRAMEWORKS/libSDL3.dylib"
+    dylibbundler -b -of -x "$FRAMEWORKS/libSDL3.dylib" -d "$FRAMEWORKS" -p '@executable_path/Frameworks/'
+fi
+if [[ ! -L "$GAME/runtime/Frameworks" || "$(readlink "$GAME/runtime/Frameworks")" != ../Frameworks ]]; then
+    echo "The runtime Frameworks link is missing or points to the wrong directory." >&2
+    exit 1
+fi
+if ! otool -L "$GAME/prince" "$GAME/runtime/prince-engine" | grep -F '@executable_path/Frameworks/' >/dev/null; then
+    echo "The executables are not configured to load the copied Frameworks directory." >&2
+    exit 1
+fi
+if strings "$FRAMEWORKS/libSDL2-2.0.0.dylib" | grep -F 'Failed loading SDL3 library.' >/dev/null && [[ ! -f "$FRAMEWORKS/libSDL3.dylib" ]]; then
+    echo "SDL2-compat is missing its dynamically loaded SDL3 runtime." >&2
+    exit 1
+fi
+if otool -L "$GAME/prince" "$GAME/runtime/prince-engine" | grep -E '/opt/homebrew/|/usr/local/opt/|@executable_path/\.\./\.\./Frameworks/' >/dev/null; then
+    echo "An executable still has an invalid Homebrew or app-bundle library path." >&2
     exit 1
 fi
 codesign --force --deep -s - "$APP"

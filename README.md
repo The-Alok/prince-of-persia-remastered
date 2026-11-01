@@ -76,17 +76,21 @@ No game files are downloaded, mounted or executed.
 ### Start with the launcher
 
 1. Extract the complete game download into a folder you can write to.
-2. Copy one supported game image/archive into the same folder as `prince.exe`
-   (Windows) or `prince` (Linux). Or use **Browse for image** in the launcher.
-   If several are present, Browse lets you select the one to import.
+2. Choose one disk image or archive from the Macintosh **Color edition** of
+   Prince of Persia. Supported files are `.hfs`, `.dsk`, `.dc42`, `.iso`, `.hqx`
+   and `.sit`. Copy it beside `prince.exe` (Windows) or `prince` (Linux), or use
+   **Browse for image** in the launcher. If several files are present, Browse
+   lets you choose the one to import.
 3. Open `prince.exe` on Windows, or run `./prince` on Linux. The launcher finds
    the image and prepares the graphics automatically, then opens the game.
    Later launches go straight to the game when the graphics are already ready.
 
 The setup window appears only when graphics need preparing. Its status lights
 show whether a disk image is selected and whether the graphics are ready. It
-remembers a browsed image and reuses the prepared graphics automatically. The
-disk image is read-only; nothing is mounted, downloaded or executed from it.
+remembers a browsed image and reuses the prepared graphics automatically. Your
+original disk image is never changed, mounted or executed; generated graphics
+are saved in the game's `data` folder. A DOS-only disk cannot provide Macintosh
+artwork; choose **Play DOS Mode** to start without importing it.
 
 The game executable lives in `runtime/`; open the launcher in the main folder.
 **Play DOS Mode** starts the game without importing Macintosh graphics. You can
@@ -104,17 +108,16 @@ review; v1.0.3 generates its optional Macintosh pack locally from your own copy.
 ## Download v1.0.3
 
 [Release notes and downloads](https://github.com/The-Alok/prince-of-persia-remastered/releases/tag/v1.0.3)
-provide the Windows and Linux hotfix builds. The latest Apple Silicon macOS
-DMG remains v1.0.2 while its updated app is prepared.
+provide the Windows, Linux and Apple Silicon macOS hotfix builds.
 
 | Platform | Download | Start |
 | --- | --- | --- |
 | Windows x64 | [Windows ZIP](https://github.com/The-Alok/prince-of-persia-remastered/releases/download/v1.0.3/prince-of-persia-remastered-v1.0.3-windows-x86_64.zip) | Extract everything, then double-click `prince.exe` |
 | Linux x64 | [Linux tar.gz](https://github.com/The-Alok/prince-of-persia-remastered/releases/download/v1.0.3/prince-of-persia-remastered-v1.0.3-linux-x86_64.tar.gz) | Extract, then run `./launch.sh` or `./prince` |
-| macOS Apple Silicon | [macOS DMG](https://github.com/The-Alok/prince-of-persia-remastered/releases/download/v1.0.2/prince-of-persia-remastered-v1.0.2-macos-arm64.dmg) | Open the DMG and drag the app into Applications |
+| macOS Apple Silicon | [macOS DMG](https://github.com/The-Alok/prince-of-persia-remastered/releases/download/v1.0.3/prince-of-persia-remastered-v1.0.3-macos-arm64.dmg) | Open the DMG and drag the app into Applications |
 
-[SHA-256 checksums for Windows and Linux](https://github.com/The-Alok/prince-of-persia-remastered/releases/download/v1.0.3/SHA256SUMS-v1.0.3.txt)
-are in the v1.0.3 release. The macOS DMG checksum is in the v1.0.2 release.
+[SHA-256 checksums](https://github.com/The-Alok/prince-of-persia-remastered/releases/download/v1.0.3/SHA256SUMS-v1.0.3.txt)
+for all three platform downloads are in the v1.0.3 release.
 
 Windows includes the required SDL runtime DLLs; keep them beside `prince.exe`.
 Linux uses system SDL2 and SDL2_image libraries. On Debian/Ubuntu:
@@ -143,8 +146,8 @@ F7 cycles picture shaders: **Pixel** (nearest-neighbour), **Sharp** (crisp
 integer prescaling), **Soft** (bilinear), and **Smooth HQ** (Scale3x edge
 smoothing). F8 cycles the installed graphics packs during play or pause. The
 pause menu shows the current shader and pack. Both choices are also available
-in Settings → Visuals and are remembered between launches. Display shortcuts
-do not skip story screens, advance animation or change movement/collision.
+in Settings → Visuals and are remembered between launches. Display shortcuts do
+not skip story screens, advance animation or change movement/collision.
 
 SDLPoP gameplay, collision, animation timing and replay logic are preserved.
 

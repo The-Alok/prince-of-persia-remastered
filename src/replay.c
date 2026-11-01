@@ -25,7 +25,7 @@ The authors of this program may be contacted at https://forum.princed.org
 
 const char replay_magic_number[3] = "P1R";
 const word replay_format_class = 0;          // unique number associated with this SDLPoP implementation / fork
-const char* implementation_name = "SDLPoP v" SDLPOP_VERSION;
+const char* implementation_name = REMASTERED_NAME " v" REMASTERED_VERSION;
 
 #define REPLAY_FORMAT_CURR_VERSION       102 // current version number of the replay format
 #define REPLAY_FORMAT_MIN_VERSION        101 // SDLPoP will open replays with this version number and higher
@@ -128,6 +128,11 @@ int read_replay_header(replay_header_type* header, FILE* fp, char* error_message
 	len_read = (byte) fgetc(fp);
 	fread_check(header->implementation_name, sizeof(char), len_read, fp);
 	header->implementation_name[len_read] = '\0';
+	/* Older replay files carry the upstream engine name. Keep the game UI
+	 * branded consistently when those files are inspected. */
+	if (strncmp(header->implementation_name, "SDLPoP", 6) == 0) {
+		snprintf_check(header->implementation_name, sizeof(header->implementation_name), "%s", REMASTERED_NAME);
+	}
 
 	if (class != replay_format_class) {
 		// incompatible, replay format is associated with a different implementation of SDLPoP
@@ -276,7 +281,7 @@ void change_working_dir_to_sdlpop_root(void) {
 
 		int result = chdir(exe_dir);
 		if (result != 0) {
-			perror("Can't change into SDLPoP directory");
+			perror("Can't change into game directory");
 		}
 	}
 
@@ -305,7 +310,7 @@ void start_with_replay_file(const char *filename) {
 			if (is_validate_mode) // Validating replays is cmd-line only, so, no sense continuing from here.
 				exit(0);
 
-			SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "SDLPoP", error_message, NULL);
+			SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, REMASTERED_NAME, error_message, NULL);
 			return;
 		}
 		if (header.uses_custom_levelset) {

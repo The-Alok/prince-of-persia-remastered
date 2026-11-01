@@ -22,7 +22,7 @@ The authors of this program may be contacted at https://forum.princed.org
 
 
 #ifdef __amigaos4__
-static const char version[] = "\0$VER: SDLPoP " SDLPOP_VERSION " (" __AMIGADATE__ ")";
+static const char version[] = "\0$VER: " REMASTERED_NAME " " REMASTERED_VERSION " (" __AMIGADATE__ ")";
 static const char stack[] = "$STACK:200000";
 #endif
 
