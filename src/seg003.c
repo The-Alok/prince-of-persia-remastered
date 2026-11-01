@@ -240,7 +240,7 @@ void draw_level_first() {
 void redraw_screen(int drawing_different_room) {
 	/* Architecture recomposition is a visual refresh, not a room entry.
 	 * Re-arming exit_room_timer here on every gate step prevents room exits. */
-	const int native_refresh = !drawing_different_room &&
+	const int native_refresh = !drawing_different_room && !different_room &&
 	                          uses_mac_native_full();
 	//remove_flash();
 	if (drawing_different_room) {
